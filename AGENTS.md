@@ -84,7 +84,7 @@ travora/
 
 ```bash
 # Frontend
-cd apps/web && pnpm dev
+cd apps/web && npm run dev
 
 # Backend
 cd services/api && go run ./cmd/api

@@ -33,19 +33,19 @@ travora/
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >=20.19.0 atau >=22.12.0
 - Go >= 1.22
 - PostgreSQL >= 15
-- pnpm (recommended) or npm
+- npm >= 9
 
 ### Frontend — `apps/web`
 
 ```bash
 cd apps/web
-pnpm install       # install dependencies
-pnpm dev           # start dev server → http://localhost:5173
-pnpm build         # production build
-pnpm preview       # preview production build locally
+npm install        # install dependencies
+npm run dev        # start dev server → http://localhost:5173
+npm run build      # production build
+npm run preview    # preview production build locally
 ```
 
 ### Backend — `services/api`
