@@ -8,7 +8,7 @@ set -euo pipefail
 
 # ── Konfigurasi (WAJIB DIGANTI) ──
 DOMAIN="sanditeguharizal.com"      # Domain production
-REPO_URL="https://github.com/Chainz-bit/Travora.git"
+REPO_URL="https://github.com/sandiwira20/Travora.git"
 APP_DIR="/opt/travora"
 BRANCH="main"
 
@@ -74,14 +74,15 @@ PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB
 # ── 3. Build Go Backend ──
 log "Membangun Go API backend..."
 cd "$APP_DIR/src/services/api"
-go build -ldflags="-s -w" -o "$APP_DIR/bin/travora-api" ./cmd/api
+/usr/local/go/bin/go mod tidy
+/usr/local/go/bin/go build -ldflags="-s -w" -o "$APP_DIR/bin/travora-api" ./cmd/api
 log "Binary backend: $APP_DIR/bin/travora-api"
 
 # ── 4. Build React Frontend ──
 log "Membangun React frontend..."
 cd "$APP_DIR/src/apps/web"
 npm ci --production=false
-VITE_API_BASE_URL="https://${DOMAIN}/api" npm run build
+VITE_API_BASE_URL="https://${DOMAIN}" npm run build
 log "Frontend build selesai"
 
 # ── 5. Deploy Frontend ke Nginx ──

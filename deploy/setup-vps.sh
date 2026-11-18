@@ -62,7 +62,7 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE travora_db TO travora
 # ── 4. Install Go 1.22 ──
 log "Menginstall Go 1.22..."
 if ! command -v go &> /dev/null; then
-  GO_VERSION="1.22.9"
+  GO_VERSION="1.26.0"
   wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
   rm -rf /usr/local/go
   tar -C /usr/local -xzf /tmp/go.tar.gz

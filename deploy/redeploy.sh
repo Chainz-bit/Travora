@@ -40,7 +40,7 @@ go build -ldflags="-s -w" -o "$APP_DIR/bin/travora-api" ./cmd/api
 log "Building React frontend..."
 cd "$APP_DIR/src/apps/web"
 npm ci --production=false
-VITE_API_BASE_URL="https://${DOMAIN}/api" npm run build
+VITE_API_BASE_URL="https://${DOMAIN}" npm run build
 
 # 4. Deploy frontend
 log "Deploying frontend..."
