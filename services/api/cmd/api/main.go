@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"travora/api/internal/auth"
+	"travora/api/internal/booking"
 	"travora/api/internal/config"
 	"travora/api/internal/database"
 	"travora/api/internal/health"
@@ -67,10 +68,16 @@ func main() {
 	scheduleService := schedule.NewService(scheduleRepo)
 	scheduleHandler := schedule.NewHandler(scheduleService)
 
+	midtransClient := booking.NewMidtransClient(cfg.MidtransServerKey, cfg.MidtransIsProduction)
+	bookingRepo := booking.NewRepository(db.Pool())
+	bookingService := booking.NewService(bookingRepo, midtransClient)
+	bookingHandler := booking.NewHandler(bookingService, authService)
+
 	healthHandler := health.NewHandler(db)
 
 	appHandler := router.New(router.Config{
 		AuthHandler:       authHandler,
+		BookingHandler:    bookingHandler,
 		HealthHandler:     healthHandler,
 		MasterDataHandler: masterDataHandler,
 		ScheduleHandler:   scheduleHandler,

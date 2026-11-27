@@ -1,13 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
 import type { BookingViewModel, BookingStatus } from '../../../types/index';
-import { authService } from '../../auth/services/authService';
-import { mockBookingService } from '../services/mockBookingService';
+import { apiClient } from '../../../services/api';
 import { MemberLayout } from '../components/MemberLayout';
 import { Button } from '../../../components/ui/Button';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Modal } from '../../../components/ui/Modal';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { LoadingState } from '../../../components/ui/LoadingState';
 import {
   TicketIcon,
   ArrowRightIcon,
@@ -23,13 +23,29 @@ export interface BookingHistoryPageProps {
 type FilterTab = 'semua' | BookingStatus;
 
 export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
-  const user = authService.getCurrentUser();
   const [activeTab, setActiveTab] = useState<FilterTab>('semua');
   const [selectedBooking, setSelectedBooking] = useState<BookingViewModel | null>(null);
+  const [allBookings, setAllBookings] = useState<BookingViewModel[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  const allBookings = useMemo(() => {
-    return mockBookingService.getAllBookings(user?.id);
-  }, [user?.id]);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    apiClient
+      .getMyBookings()
+      .then((rows) => {
+        if (active) setAllBookings(rows);
+      })
+      .catch(() => {
+        if (active) setAllBookings([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredBookings = useMemo(() => {
     if (activeTab === 'semua') return allBookings;
@@ -131,7 +147,11 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
         </div>
 
         {/* Content Table / Cards */}
-        {filteredBookings.length === 0 ? (
+        {loading ? (
+          <div className="bg-white rounded-2xl border border-stone-200 p-10">
+            <LoadingState message="Memuat riwayat pemesanan..." />
+          </div>
+        ) : filteredBookings.length === 0 ? (
           <div className="bg-white rounded-2xl border border-stone-200 p-8">
             <EmptyState
               icon={<TicketIcon className="size-7 text-control-border" />}

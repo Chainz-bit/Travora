@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"travora/api/internal/auth"
+	"travora/api/internal/booking"
 	"travora/api/internal/health"
 	"travora/api/internal/masterdata"
 	"travora/api/internal/middleware"
@@ -15,6 +16,7 @@ import (
 // Config menyimpan dependensi seluruh handler untuk pembangunan router HTTP.
 type Config struct {
 	AuthHandler       *auth.Handler
+	BookingHandler    *booking.Handler
 	HealthHandler     *health.Handler
 	MasterDataHandler *masterdata.Handler
 	ScheduleHandler   *schedule.Handler
@@ -107,6 +109,11 @@ func New(cfg Config) http.Handler {
 	// 4. Daftarkan Authentication endpoints
 	if cfg.AuthHandler != nil {
 		cfg.AuthHandler.RegisterRoutes(mux)
+	}
+
+	// 5. Daftarkan Booking & Pembayaran QRIS Midtrans endpoints
+	if cfg.BookingHandler != nil {
+		cfg.BookingHandler.RegisterRoutes(mux)
 	}
 
 	// 5. Pasang wrapper JSON error untuk respons 404 dan 405 bawaan ServeMux

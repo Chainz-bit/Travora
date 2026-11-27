@@ -1,12 +1,13 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../../lib/utils';
-import { mockSeatAvailabilityService } from '../services/mockSeatAvailabilityService';
+import { apiClient } from '../../../services/api';
 import { CheckIcon, InfoIcon } from '../../../components/ui/Icons';
 
 export interface SeatSelectorProps {
   scheduleId: string;
   selectedSeat: string;
   onSelectSeat: (seatNumber: string) => void;
+  totalSeats?: number;
   className?: string;
 }
 
@@ -14,11 +15,51 @@ export function SeatSelector({
   scheduleId,
   selectedSeat,
   onSelectSeat,
+  totalSeats = 10,
   className,
 }: SeatSelectorProps) {
-  const seats = useMemo(() => {
-    return mockSeatAvailabilityService.getSeatsForSchedule(scheduleId);
+  const [occupiedSeats, setOccupiedSeats] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!scheduleId) return;
+
+    setLoading(true);
+    apiClient
+      .getOccupiedSeats(scheduleId)
+      .then((occupied) => {
+        if (active) {
+          setOccupiedSeats(occupied);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setOccupiedSeats([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [scheduleId]);
+
+  const seats = useMemo(() => {
+    const occupiedSet = new Set(occupiedSeats);
+    const count = Math.max(6, Math.min(totalSeats || 10, 14));
+    return Array.from({ length: count }, (_, idx) => {
+      const seatNumber = String(idx + 1).padStart(2, '0');
+      return {
+        seatNumber,
+        isAvailable: !occupiedSet.has(seatNumber),
+      };
+    });
+  }, [occupiedSeats, totalSeats]);
 
   return (
     <div className={cn('space-y-4', className)}>
@@ -28,7 +69,9 @@ export function SeatSelector({
             Pilihan Nomor Kursi
           </h3>
           <p className="text-xs text-stone-500 mt-0.5">
-            Pilih satu nomor kursi preferensi Anda untuk keberangkatan.
+            {loading
+              ? 'Memuat ketersediaan kursi dari database...'
+              : 'Pilih satu nomor kursi preferensi Anda untuk keberangkatan.'}
           </p>
         </div>
 
@@ -71,7 +114,7 @@ export function SeatSelector({
             <button
               key={seat.seatNumber}
               type="button"
-              disabled={!isAvailable}
+              disabled={!isAvailable || loading}
               onClick={() => {
                 if (isAvailable) {
                   onSelectSeat(seat.seatNumber);
@@ -111,11 +154,10 @@ export function SeatSelector({
             )}
           </p>
           <p className="text-orange-900 leading-relaxed text-[11px]">
-            Nomor kursi yang dipilih akan tertera langsung pada e-tiket dan manifes keberangkatan armada.
+            Kursi akan dikunci sementara selama 15 menit untuk menyelesaikan pembayaran QRIS Midtrans.
           </p>
         </div>
       </div>
     </div>
   );
 }
-

@@ -31,6 +31,9 @@ type Config struct {
 	SessionSecret   string
 	SessionDuration time.Duration
 	CookieSecure    bool
+
+	MidtransServerKey    string
+	MidtransIsProduction bool
 }
 
 // Load membaca konfigurasi dari environment variables dengan nilai default yang aman.
@@ -70,6 +73,9 @@ func LoadFromEnv(lookup func(string) string) (*Config, error) {
 		SessionSecret:   getEnv(lookup, "SESSION_SECRET", "travora-dev-session-secret-key-32chars!!"),
 		SessionDuration: getEnvAsDuration(lookup, "SESSION_DURATION", 24*time.Hour),
 		CookieSecure:    getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
+
+		MidtransServerKey:    getEnv(lookup, "MIDTRANS_SERVER_KEY", ""),
+		MidtransIsProduction: getEnvAsBool(lookup, "MIDTRANS_IS_PRODUCTION", false),
 	}
 
 	if err := cfg.Validate(); err != nil {

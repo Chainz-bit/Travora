@@ -3,7 +3,7 @@
  * Berkomunikasi dengan Go REST API Backend (/api/v1/...)
  */
 
-import type { CityOption, ScheduleViewModel } from '../types/index';
+import type { BookingStatus, BookingViewModel, CityOption, ScheduleViewModel } from '../types/index';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
@@ -63,6 +63,54 @@ export interface ApiSchedule {
   nm_kota_tujuan: string;
 }
 
+export interface ApiBookingDetail {
+  id_pesan: number;
+  booking_code: string;
+  id_jadwal: number;
+  id_member: number;
+  member_name: string;
+  member_phone: string;
+  nomor_kursi: string;
+  status: string;
+  payment_method: string;
+  harga: number;
+  tgl_berangkat: string;
+  jam_berangkat: string;
+  jenis_mobil: string;
+  nomor_polisi: string;
+  id_kota_asal: number;
+  nm_kota_asal: string;
+  id_kota_tujuan: number;
+  nm_kota_tujuan: string;
+  created_at: string;
+  midtrans_order_id?: string;
+  qris_url?: string;
+  qris_expires_at?: string;
+}
+
+export interface ApiQRISPayment {
+  booking_id: number;
+  booking_code: string;
+  order_id: string;
+  amount: number;
+  status: string;
+  transaction_status: string;
+  qris_url: string;
+  expires_at: string;
+  is_production: boolean;
+}
+
+export interface ApiPaymentStatus {
+  booking_id: number;
+  booking_code: string;
+  order_id?: string;
+  status: string;
+  transaction_status: string;
+  amount: number;
+  qris_url?: string;
+  expires_at?: string;
+}
+
 export interface ScheduleSearchParams {
   originCityId?: number | string;
   destinationCityId?: number | string;
@@ -98,6 +146,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
+      credentials: 'include',
       ...options,
       headers,
     });
@@ -259,6 +308,77 @@ export const apiClient = {
       price: s.harga,
       availableSeats: s.jenis_mobil.includes('11') ? 11 : s.jenis_mobil.includes('14') ? 14 : s.jenis_mobil.includes('12') ? 12 : s.jenis_mobil.includes('8') ? 8 : 6,
     };
+  },
+
+  /**
+   * Booking: Ambil daftar nomor kursi yang sudah terisi untuk suatu jadwal
+   */
+  async getOccupiedSeats(scheduleId: number | string): Promise<string[]> {
+    const res = await request<{ schedule_id: number; occupied_seats: string[] }>(
+      `/api/v1/schedules/${scheduleId}/seats`
+    );
+    return res.occupied_seats || [];
+  },
+
+  /**
+   * Booking: Buat pesanan tiket baru di PostgreSQL
+   */
+  async createBooking(scheduleId: number, seatNumber: string): Promise<ApiBookingDetail> {
+    return request<ApiBookingDetail>('/api/v1/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schedule_id: scheduleId,
+        seat_number: seatNumber,
+      }),
+    });
+  },
+
+  /**
+   * Booking: Ambil riwayat pemesanan milik member yang sedang login
+   */
+  async getMyBookings(): Promise<BookingViewModel[]> {
+    const rows = await request<ApiBookingDetail[]>('/api/v1/bookings/me');
+    return rows.map((b): BookingViewModel => ({
+      id: String(b.id_pesan),
+      scheduleId: String(b.id_jadwal),
+      schedule: {
+        id: String(b.id_jadwal),
+        originCityId: String(b.id_kota_asal),
+        originCityName: b.nm_kota_asal,
+        destinationCityId: String(b.id_kota_tujuan),
+        destinationCityName: b.nm_kota_tujuan,
+        departureDate: b.tgl_berangkat,
+        departureTime: b.jam_berangkat,
+        vehicleName: b.jenis_mobil,
+        vehiclePlate: b.nomor_polisi,
+        price: b.harga,
+      },
+      memberId: String(b.id_member),
+      memberName: b.member_name,
+      memberPhone: b.member_phone,
+      seatNumber: b.nomor_kursi,
+      totalPrice: b.harga,
+      bookingDate: b.created_at ? b.created_at.slice(0, 10) : '',
+      status: b.status as BookingStatus,
+      paymentConfirmationId: b.midtrans_order_id,
+    }));
+  },
+
+  /**
+   * Pembayaran QRIS Midtrans: Generate atau ambil ulang kode QRIS aktif
+   */
+  async createQRISPayment(bookingId: number | string): Promise<ApiQRISPayment> {
+    return request<ApiQRISPayment>(`/api/v1/bookings/${bookingId}/qris`, {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Pembayaran QRIS Midtrans: Cek & sinkronkan status pembayaran terkini
+   */
+  async getPaymentStatus(bookingId: number | string): Promise<ApiPaymentStatus> {
+    return request<ApiPaymentStatus>(`/api/v1/bookings/${bookingId}/payment-status`);
   },
 };
 
