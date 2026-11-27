@@ -1,7 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import type { ScheduleViewModel } from '../../../types/index';
+import { apiClient } from '../../../services/api';
+import {
+  bookingApiService,
+  type BookingRecord,
+  type PaymentConfirmationRecord,
+} from '../../member/services/bookingApiService';
 import {
   ReceiptIcon,
   CheckCircle2Icon,
@@ -19,16 +24,44 @@ export interface OperatorDashboardPageProps {
 }
 
 export function OperatorDashboardPage({ onNavigate }: OperatorDashboardPageProps) {
-  useSharedStore();
+  const [schedules, setSchedules] = useState<ScheduleViewModel[]>([]);
+  const [bookings, setBookings] = useState<BookingRecord[]>([]);
+  const [confirmations, setConfirmations] = useState<PaymentConfirmationRecord[]>([]);
 
-  const metrics = sharedStore.getOperatorMetrics();
-  const schedules = sharedStore.getSchedules(true);
-  const bookings = sharedStore.getBookings();
-  const confirmations = sharedStore.getConfirmations();
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiClient.getSchedules(),
+      bookingApiService.getOperatorBookings(),
+      bookingApiService.getOperatorConfirmations(),
+    ])
+      .then(([scheds, bks, confs]) => {
+        if (!active) return;
+        setSchedules(scheds);
+        setBookings(bks);
+        setConfirmations(confs);
+      })
+      .catch(() => {
+        if (!active) return;
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const pendingConfirmations = useMemo(() => {
     return confirmations.filter((c) => c.status === 'menunggu_verifikasi');
   }, [confirmations]);
+
+  const metrics = useMemo(() => {
+    return {
+      todaySchedulesCount: schedules.length,
+      confirmedBookingsCount: bookings.filter(
+        (b) => b.status === 'terkonfirmasi' || b.status === 'selesai'
+      ).length,
+      pendingConfirmationsCount: pendingConfirmations.length,
+    };
+  }, [schedules, bookings, pendingConfirmations]);
 
   // Today's active schedules preview
   const activeSchedulesPreview = useMemo(() => {

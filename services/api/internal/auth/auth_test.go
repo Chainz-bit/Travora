@@ -450,4 +450,54 @@ func TestAuth_RegisterSuccessAndLogin(t *testing.T) {
 	}
 }
 
+func TestAuth_RegisterRejectsPrivilegedRoles(t *testing.T) {
+	handler, _ := setupTestAuth(t)
+
+	for _, forbiddenRole := range []string{"admin", "operator", "superadmin"} {
+		payload, _ := json.Marshal(RegisterRequest{
+			Name:     "Intruder",
+			Email:    "intruder@travora.id",
+			Phone:    "081234567890",
+			Password: "Password123",
+			Role:     forbiddenRole,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(payload))
+		res := httptest.NewRecorder()
+		handler.Register(res, req)
+
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("POST /auth/register dengan role=%q expected 403 Forbidden, got %d (%s)", forbiddenRole, res.Code, res.Body.String())
+		}
+	}
+}
+
+func TestAuth_RegisterRejectsDuplicateUsername(t *testing.T) {
+	handler, repo := setupTestAuth(t)
+
+	origMember, err := repo.FindMemberByUsername(context.Background(), "budi_santoso")
+	if err != nil {
+		t.Fatalf("Member seed tidak ditemukan: %v", err)
+	}
+	origHash := origMember.PasswordHash
+
+	payload, _ := json.Marshal(RegisterRequest{
+		Name:     "Attacker",
+		Username: "budi_santoso",
+		Phone:    "081200009999",
+		Password: "hackedpassword123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(payload))
+	res := httptest.NewRecorder()
+	handler.Register(res, req)
+
+	if res.Code != http.StatusConflict {
+		t.Fatalf("POST /auth/register duplikat expected 409 Conflict, got %d (%s)", res.Code, res.Body.String())
+	}
+
+	afterMember, _ := repo.FindMemberByUsername(context.Background(), "budi_santoso")
+	if afterMember.PasswordHash != origHash {
+		t.Fatal("Password member yang sudah terdaftar tidak boleh tertimpa oleh registrasi duplikat!")
+	}
+}
+
 

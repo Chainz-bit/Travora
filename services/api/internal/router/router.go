@@ -4,23 +4,33 @@ import (
 	"net/http"
 	"strings"
 
+	"travora/api/internal/adminmaster"
+	"travora/api/internal/adminoperators"
 	"travora/api/internal/auth"
 	"travora/api/internal/booking"
+	"travora/api/internal/bookings"
+	"travora/api/internal/complaints"
 	"travora/api/internal/health"
 	"travora/api/internal/masterdata"
 	"travora/api/internal/middleware"
 	"travora/api/internal/response"
 	"travora/api/internal/schedule"
+	"travora/api/internal/tickets"
 )
 
 // Config menyimpan dependensi seluruh handler untuk pembangunan router HTTP.
 type Config struct {
-	AuthHandler       *auth.Handler
-	BookingHandler    *booking.Handler
-	HealthHandler     *health.Handler
-	MasterDataHandler *masterdata.Handler
-	ScheduleHandler   *schedule.Handler
-	CORSOrigins       []string
+	AdminMasterHandler    *adminmaster.Handler
+	AdminOperatorsHandler *adminoperators.Handler
+	AuthHandler           *auth.Handler
+	BookingHandler        *booking.Handler
+	BookingsHandler       *bookings.Handler
+	ComplaintsHandler     *complaints.Handler
+	HealthHandler         *health.Handler
+	MasterDataHandler     *masterdata.Handler
+	ScheduleHandler       *schedule.Handler
+	TicketHandler         *tickets.Handler
+	CORSOrigins           []string
 }
 
 // statusRecorder menyadap status code untuk memastikan pesan error ServeMux berformat JSON.
@@ -111,12 +121,37 @@ func New(cfg Config) http.Handler {
 		cfg.AuthHandler.RegisterRoutes(mux)
 	}
 
-	// 5. Daftarkan Booking & Pembayaran QRIS Midtrans endpoints
+	// 5. Daftarkan Ticket & QR Check-in endpoints
+	if cfg.TicketHandler != nil {
+		cfg.TicketHandler.RegisterRoutes(mux)
+	}
+
+	// 6. Daftarkan Admin Operators Management endpoints (wajib role == admin)
+	if cfg.AdminOperatorsHandler != nil {
+		cfg.AdminOperatorsHandler.RegisterRoutes(mux)
+	}
+
+	// 7. Daftarkan Bookings & Operator Verification endpoints
+	if cfg.BookingsHandler != nil {
+		cfg.BookingsHandler.RegisterRoutes(mux)
+	}
+
+	// 8. Daftarkan Booking & Pembayaran QRIS Midtrans endpoints
 	if cfg.BookingHandler != nil {
 		cfg.BookingHandler.RegisterRoutes(mux)
 	}
 
-	// 5. Pasang wrapper JSON error untuk respons 404 dan 405 bawaan ServeMux
+	// 9. Daftarkan Admin Master Data & Jadwal endpoints (wajib role == admin)
+	if cfg.AdminMasterHandler != nil {
+		cfg.AdminMasterHandler.RegisterRoutes(mux)
+	}
+
+	// 10. Daftarkan Complaints endpoints (member & admin)
+	if cfg.ComplaintsHandler != nil {
+		cfg.ComplaintsHandler.RegisterRoutes(mux)
+	}
+
+	// 11. Pasang wrapper JSON error untuk respons 404 dan 405 bawaan ServeMux
 	handlerWithJSONErrors := jsonErrorHandler(mux)
 
 	// 5. Konfigurasi dan pasang middleware CORS

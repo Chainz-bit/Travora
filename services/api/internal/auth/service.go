@@ -272,7 +272,13 @@ func (s *Service) SetPassword(ctx context.Context, role, identifier, newPassword
 }
 
 // RegisterMember mendaftarkan pengguna baru sebagai Member di sistem Travora.
+// Keamanan: Registrasi publik HANYA mengizinkan role member/user dan menolaknya jika meminta role admin/operator.
 func (s *Service) RegisterMember(ctx context.Context, req RegisterRequest) (*User, error) {
+	requestedRole := strings.ToLower(strings.TrimSpace(req.Role))
+	if requestedRole != "" && requestedRole != RoleMember && requestedRole != "user" {
+		return nil, ErrForbiddenRoleRegistration
+	}
+
 	name := strings.TrimSpace(req.Name)
 	phone := strings.TrimSpace(req.Phone)
 	password := req.Password
@@ -289,24 +295,13 @@ func (s *Service) RegisterMember(ctx context.Context, req RegisterRequest) (*Use
 		return nil, errors.New("kata sandi minimal 6 karakter")
 	}
 
-	// Jika akun sudah ada, perbarui kata sandi agar pengguna dapat segera login dengan kata sandi barunya
+	// Tolak registrasi jika username/email sudah terdaftar agar tidak menimpa akun milik pengguna lain.
 	existing, err := s.repo.FindMemberByUsername(ctx, username)
 	if err == nil && existing != nil {
-		hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return nil, fmt.Errorf("gagal menghasilkan hash password: %w", err)
-		}
-		if updateErr := s.repo.UpdateMemberPassword(ctx, existing.ID, string(hashedBytes)); updateErr != nil {
-			return nil, fmt.Errorf("gagal memperbarui akun member: %w", updateErr)
-		}
-		return &User{
-			ID:         existing.ID,
-			Role:       RoleMember,
-			Identifier: existing.Username,
-			Name:       name,
-			Username:   existing.Username,
-			Phone:      phone,
-		}, nil
+		return nil, ErrUsernameExists
+	}
+	if err != nil && !errors.Is(err, ErrUserNotFound) {
+		return nil, fmt.Errorf("gagal memeriksa ketersediaan username member: %w", err)
 	}
 
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

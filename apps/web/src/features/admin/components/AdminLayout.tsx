@@ -11,6 +11,7 @@ import {
   LogOutIcon,
   MenuIcon,
   XIcon,
+  UserIcon,
 } from '../../../components/ui/Icons';
 import { cn } from '../../../lib/utils';
 
@@ -44,7 +45,7 @@ export function AdminLayout({
 
   const handleLogout = async () => {
     await authService.logout();
-    onNavigate('/login');
+    onNavigate('/admin/login');
   };
 
   const navItems: { label: string; path: RoutePath; icon: typeof LayoutDashboardIcon }[] = [
@@ -54,6 +55,7 @@ export function AdminLayout({
     { label: 'Manajemen Kendaraan', path: '/admin/vehicles', icon: BusIcon },
     { label: 'Manajemen Jadwal', path: '/admin/schedules', icon: CalendarIcon },
     { label: 'Manajemen Keluhan', path: '/admin/complaints', icon: MessageSquareIcon },
+    { label: 'Kelola Operator', path: '/admin/operators', icon: UserIcon },
   ];
 
   return (

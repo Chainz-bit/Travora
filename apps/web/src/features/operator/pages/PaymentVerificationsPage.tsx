@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { PaymentConfirmationViewModel } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import {
+  bookingApiService,
+  type PaymentConfirmationRecord,
+} from '../../member/services/bookingApiService';
 import {
   ReceiptIcon,
   SearchIcon,
@@ -28,21 +29,42 @@ export interface PaymentVerificationsPageProps {
 }
 
 export function PaymentVerificationsPage() {
-  useSharedStore();
   const toast = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'menunggu_verifikasi' | 'terverifikasi' | 'ditolak'>('all');
 
-  const [selectedConf, setSelectedConf] = useState<PaymentConfirmationViewModel | null>(null);
+  const [confirmations, setConfirmations] = useState<PaymentConfirmationRecord[]>([]);
+  const [selectedConf, setSelectedConf] = useState<PaymentConfirmationRecord | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [approveModalOpen, setApproveModalOpen] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [targetConf, setTargetConf] = useState<PaymentConfirmationViewModel | null>(null);
+  const [targetConf, setTargetConf] = useState<PaymentConfirmationRecord | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const confirmations = sharedStore.getConfirmations();
+  useEffect(() => {
+    let active = true;
+    bookingApiService
+      .getOperatorConfirmations()
+      .then((list) => {
+        if (!active) return;
+        setConfirmations(list);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFeedbackMessage({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Gagal memuat daftar konfirmasi pembayaran.',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredConfirmations = useMemo(() => {
     let result = confirmations;
@@ -66,67 +88,71 @@ export function PaymentVerificationsPage() {
     return result;
   }, [confirmations, statusFilter, searchQuery]);
 
-  const handleOpenApproveModal = (conf: PaymentConfirmationViewModel) => {
+  const handleOpenApproveModal = (conf: PaymentConfirmationRecord) => {
     setTargetConf(conf);
     setApproveModalOpen(true);
   };
 
-  const handleOpenRejectModal = (conf: PaymentConfirmationViewModel) => {
+  const handleOpenRejectModal = (conf: PaymentConfirmationRecord) => {
     setTargetConf(conf);
     setRejectModalOpen(true);
   };
 
-  const handleConfirmApprove = () => {
+  const handleConfirmApprove = async () => {
     if (!targetConf) return;
     setIsProcessing(true);
 
-    const res = sharedStore.verifyConfirmation(targetConf.id, true);
-    setIsProcessing(false);
-
-    if (!res.success) {
-      toast.error(res.error || 'Gagal memverifikasi pembayaran.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal memverifikasi pembayaran.' });
-    } else {
-      const msg = `Konfirmasi transfer untuk tiket ${targetConf.bookingId} (${formatRupiah(targetConf.transferAmount)}) berhasil disetujui. Tiket kini terkonfirmasi lunas.`;
+    try {
+      await bookingApiService.verifyConfirmation(targetConf.id, true);
+      const updated = await bookingApiService.getOperatorConfirmations();
+      setConfirmations(updated);
+      const msg = `Konfirmasi transfer untuk tiket ${targetConf.bookingId} (${formatRupiah(targetConf.transferAmount)}) berhasil disetujui. E-Tiket member kini aktif & siap di-scan.`;
       toast.success(msg);
       setFeedbackMessage({
         type: 'success',
         text: msg,
       });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal memverifikasi pembayaran.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsProcessing(false);
+      setApproveModalOpen(false);
+      setDetailModalOpen(false);
+      setTargetConf(null);
     }
-
-    setApproveModalOpen(false);
-    setDetailModalOpen(false);
-    setTargetConf(null);
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
-  const handleConfirmReject = () => {
+  const handleConfirmReject = async () => {
     if (!targetConf) return;
     setIsProcessing(true);
 
-    const res = sharedStore.verifyConfirmation(targetConf.id, false);
-    setIsProcessing(false);
-
-    if (!res.success) {
-      toast.error(res.error || 'Gagal menolak konfirmasi.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal menolak konfirmasi.' });
-    } else {
+    try {
+      await bookingApiService.verifyConfirmation(targetConf.id, false);
+      const updated = await bookingApiService.getOperatorConfirmations();
+      setConfirmations(updated);
       const msg = `Konfirmasi transfer untuk tiket ${targetConf.bookingId} ditolak. Status pesanan dikembalikan menjadi "Menunggu Pembayaran".`;
       toast.warning(msg);
       setFeedbackMessage({
         type: 'error',
         text: msg,
       });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menolak konfirmasi.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsProcessing(false);
+      setRejectModalOpen(false);
+      setDetailModalOpen(false);
+      setTargetConf(null);
     }
-
-    setRejectModalOpen(false);
-    setDetailModalOpen(false);
-    setTargetConf(null);
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
-  const handleOpenDetail = (conf: PaymentConfirmationViewModel) => {
+  const handleOpenDetail = (conf: PaymentConfirmationRecord) => {
     setSelectedConf(conf);
     setDetailModalOpen(true);
   };

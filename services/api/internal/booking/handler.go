@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"travora/api/internal/auth"
 	"travora/api/internal/response"
@@ -31,10 +32,10 @@ func NewHandler(service *Service, sessions SessionValidator) *Handler {
 	}
 }
 
-// RegisterRoutes mendaftarkan seluruh endpoint booking & pembayaran QRIS Midtrans ke ServeMux.
+// RegisterRoutes mendaftarkan endpoint pembayaran QRIS Midtrans dan seat availability ke ServeMux.
+// Endpoint POST /api/v1/bookings ditangani terpusat oleh bookings.Handler agar sinkron dengan tabel tickets.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/schedules/{id}/seats", h.GetSeatAvailability)
-	mux.HandleFunc("POST /api/v1/bookings", h.CreateBooking)
 	mux.HandleFunc("GET /api/v1/bookings/me", h.ListMyBookings)
 	mux.HandleFunc("POST /api/v1/bookings/{id}/qris", h.CreateQRISPayment)
 	mux.HandleFunc("GET /api/v1/bookings/{id}/payment-status", h.GetPaymentStatus)
@@ -42,13 +43,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) authenticateMember(w http.ResponseWriter, r *http.Request) (*auth.User, bool) {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	var token string
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil && cookie.Value != "" {
+		token = cookie.Value
+	} else if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		token = strings.TrimSpace(authHeader[7:])
+	}
+	if token == "" {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "silakan masuk terlebih dahulu")
 		return nil, false
 	}
 
-	user, err := h.sessions.ValidateSession(r.Context(), cookie.Value)
+	user, err := h.sessions.ValidateSession(r.Context(), token)
 	if err != nil {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "sesi tidak valid atau telah kedaluwarsa")
 		return nil, false

@@ -25,6 +25,7 @@ import { CitiesManagementPage } from './features/admin/pages/CitiesManagementPag
 import { VehiclesManagementPage } from './features/admin/pages/VehiclesManagementPage';
 import { SchedulesManagementPage } from './features/admin/pages/SchedulesManagementPage';
 import { AdminComplaintsPage } from './features/admin/pages/AdminComplaintsPage';
+import { OperatorsManagementPage } from './features/admin/pages/OperatorsManagementPage';
 
 // Operator Pages & Layout
 import { OperatorLayout } from './features/operator/components/OperatorLayout';
@@ -32,6 +33,9 @@ import { OperatorLoginPage } from './features/operator/pages/OperatorLoginPage';
 import { OperatorDashboardPage } from './features/operator/pages/OperatorDashboardPage';
 import { PaymentVerificationsPage } from './features/operator/pages/PaymentVerificationsPage';
 import { DepartureValidationPage } from './features/operator/pages/DepartureValidationPage';
+
+// E-Tiket QR & Operator Scan Pages
+import { OperatorScanPage, UserTicketsPage } from './pages/tickets';
 
 import { getTodayDateString } from './lib/utils';
 import type { SearchTicketFormValues } from './types/index';
@@ -42,7 +46,11 @@ export function App() {
   const [sessionLoading, setSessionLoading] = useState<boolean>(!authService.isInitialized());
 
   const isAdminRoute = currentPath.startsWith('/admin') && currentPath !== '/admin/login';
-  const isOperatorRoute = currentPath.startsWith('/operator') && currentPath !== '/operator/login';
+  const isOperatorRoute =
+    currentPath.startsWith('/operator') &&
+    currentPath !== '/operator/login' &&
+    currentPath !== '/operator/scan';
+  const isOperatorScanRoute = currentPath === '/operator/scan';
   const isMemberRoute = currentPath.startsWith('/member');
 
   // Inisialisasi dan sinkronisasi sesi cookie HttpOnly dengan backend PostgreSQL (/api/v1/auth/me)
@@ -70,10 +78,25 @@ export function App() {
       navigate('/admin/login', { redirect: currentPath });
     } else if (isOperatorRoute && currentUser?.role !== 'operator') {
       navigate('/operator/login', { redirect: currentPath });
+    } else if (
+      isOperatorScanRoute &&
+      currentUser?.role !== 'operator' &&
+      currentUser?.role !== 'admin'
+    ) {
+      navigate('/operator/login', { redirect: currentPath });
     } else if (isMemberRoute && currentUser?.role !== 'member') {
       navigate('/login', { redirect: currentPath });
     }
-  }, [sessionLoading, isAdminRoute, isOperatorRoute, isMemberRoute, currentUser, currentPath, navigate]);
+  }, [
+    sessionLoading,
+    isAdminRoute,
+    isOperatorRoute,
+    isOperatorScanRoute,
+    isMemberRoute,
+    currentUser,
+    currentPath,
+    navigate,
+  ]);
 
   function handleSearch(values: SearchTicketFormValues) {
     navigate('/schedules', values);
@@ -89,7 +112,10 @@ export function App() {
 
   const renderRouteContent = () => {
     // Tampilkan loading saat memeriksa sesi pada rute terproteksi
-    if ((isAdminRoute || isOperatorRoute || isMemberRoute) && sessionLoading) {
+    if (
+      (isAdminRoute || isOperatorRoute || isOperatorScanRoute || isMemberRoute) &&
+      sessionLoading
+    ) {
       return (
         <div className="min-h-screen bg-canvas-public flex flex-col items-center justify-center p-6">
           <LoadingState message="Memeriksa sesi autentikasi akun..." />
@@ -135,6 +161,9 @@ export function App() {
           )}
           {currentPath === '/admin/complaints' && (
             <AdminComplaintsPage />
+          )}
+          {currentPath === '/admin/operators' && (
+            <OperatorsManagementPage />
           )}
           {currentPath === '/admin' && (
             <AdminDashboardPage onNavigate={navigate} />
@@ -238,6 +267,29 @@ export function App() {
       return <MemberDashboardPage onNavigate={navigate} />;
     }
 
+    if (isOperatorScanRoute) {
+      if (currentUser?.role === 'operator') {
+        return (
+          <OperatorLayout currentPath={currentPath} onNavigate={navigate}>
+            <OperatorScanPage />
+          </OperatorLayout>
+        );
+      }
+      if (currentUser?.role === 'admin') {
+        return (
+          <AdminLayout currentPath={currentPath} onNavigate={navigate}>
+            <OperatorScanPage />
+          </AdminLayout>
+        );
+      }
+      return (
+        <OperatorLoginPage
+          onNavigate={navigate}
+          redirectPath={currentPath}
+        />
+      );
+    }
+
     // ==========================================
     // 4. PUBLIC ROUTES (Navbar & Footer)
     // ==========================================
@@ -249,7 +301,9 @@ export function App() {
         />
 
         <main className="flex-1 flex flex-col">
-          {currentPath === '/schedules' ? (
+          {currentPath === '/tickets' ? (
+            <UserTicketsPage onNavigate={navigate} />
+          ) : currentPath === '/schedules' ? (
             <SchedulesPage
               initialSearchValues={searchParams}
               onNavigateHome={() => navigate('/')}

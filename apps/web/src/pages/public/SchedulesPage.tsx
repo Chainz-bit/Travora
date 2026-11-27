@@ -31,9 +31,9 @@ export function SchedulesPage({
   const [searchParams, setSearchParams] = useState<SearchTicketFormValues>(
     () =>
       initialSearchValues || {
-        originCityId: '101',
-        destinationCityId: '201',
-        departureDate: '2026-11-13',
+        originCityId: '',
+        destinationCityId: '',
+        departureDate: '',
       }
   );
 

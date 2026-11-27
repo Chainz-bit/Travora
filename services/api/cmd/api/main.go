@@ -10,14 +10,19 @@ import (
 	"syscall"
 	"time"
 
+	"travora/api/internal/adminmaster"
+	"travora/api/internal/adminoperators"
 	"travora/api/internal/auth"
 	"travora/api/internal/booking"
+	"travora/api/internal/bookings"
+	"travora/api/internal/complaints"
 	"travora/api/internal/config"
 	"travora/api/internal/database"
 	"travora/api/internal/health"
 	"travora/api/internal/masterdata"
 	"travora/api/internal/router"
 	"travora/api/internal/schedule"
+	"travora/api/internal/tickets"
 )
 
 func main() {
@@ -68,19 +73,54 @@ func main() {
 	scheduleService := schedule.NewService(scheduleRepo)
 	scheduleHandler := schedule.NewHandler(scheduleService)
 
+	ticketRepo := tickets.NewRepository(db.Pool())
+	if err := ticketRepo.EnsureSchema(ctx); err != nil {
+		log.Fatalf("Gagal inisialisasi skema modul tiket: %v", err)
+	}
+	ticketService := tickets.NewService(ticketRepo)
+	ticketHandler := tickets.NewHandler(ticketService, authService)
+
+	bookingRepo := bookings.NewRepository(db.Pool())
+	if err := bookingRepo.EnsureSchema(ctx); err != nil {
+		log.Fatalf("Gagal inisialisasi skema modul pemesanan: %v", err)
+	}
+	bookingService := bookings.NewService(bookingRepo)
+	bookingHandler := bookings.NewHandler(bookingService, authService)
+
 	midtransClient := booking.NewMidtransClient(cfg.MidtransServerKey, cfg.MidtransIsProduction, cfg.MidtransSignatureKey)
-	bookingRepo := booking.NewRepository(db.Pool())
-	bookingService := booking.NewService(bookingRepo, midtransClient)
-	bookingHandler := booking.NewHandler(bookingService, authService)
+	qrisBookingRepo := booking.NewRepository(db.Pool())
+	qrisBookingService := booking.NewService(qrisBookingRepo, midtransClient)
+	qrisBookingHandler := booking.NewHandler(qrisBookingService, authService)
+
+	adminOpRepo := adminoperators.NewRepository(db.Pool())
+	adminOpService := adminoperators.NewService(adminOpRepo)
+	adminOpHandler := adminoperators.NewHandler(adminOpService, authService)
+
+	adminMasterRepo := adminmaster.NewRepository(db.Pool())
+	adminMasterService := adminmaster.NewService(adminMasterRepo)
+	adminMasterHandler := adminmaster.NewHandler(adminMasterService, authService)
+
+	complaintsRepo := complaints.NewRepository(db.Pool())
+	if err := complaintsRepo.EnsureSchema(ctx); err != nil {
+		log.Fatalf("Gagal inisialisasi skema modul keluhan: %v", err)
+	}
+	complaintsService := complaints.NewService(complaintsRepo)
+	complaintsHandler := complaints.NewHandler(complaintsService, authService)
 
 	healthHandler := health.NewHandler(db)
 
 	appHandler := router.New(router.Config{
-		AuthHandler:       authHandler,
-		BookingHandler:    bookingHandler,
-		HealthHandler:     healthHandler,
-		MasterDataHandler: masterDataHandler,
-		ScheduleHandler:   scheduleHandler,
+		AdminMasterHandler:    adminMasterHandler,
+		AdminOperatorsHandler: adminOpHandler,
+		AuthHandler:           authHandler,
+		BookingHandler:        qrisBookingHandler,
+		BookingsHandler:       bookingHandler,
+		ComplaintsHandler:     complaintsHandler,
+		HealthHandler:         healthHandler,
+		MasterDataHandler:     masterDataHandler,
+		ScheduleHandler:       scheduleHandler,
+		TicketHandler:         ticketHandler,
+		CORSOrigins:           cfg.CORSOrigins,
 	})
 
 	// 5. Konfigurasi HTTP Server dengan timeout terukur

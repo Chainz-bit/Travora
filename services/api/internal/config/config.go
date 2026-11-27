@@ -31,6 +31,7 @@ type Config struct {
 	SessionSecret   string
 	SessionDuration time.Duration
 	CookieSecure    bool
+	CORSOrigins     []string
 
 	MidtransServerKey    string
 	MidtransSignatureKey string
@@ -74,6 +75,7 @@ func LoadFromEnv(lookup func(string) string) (*Config, error) {
 		SessionSecret:   getEnv(lookup, "SESSION_SECRET", "travora-dev-session-secret-key-32chars!!"),
 		SessionDuration: getEnvAsDuration(lookup, "SESSION_DURATION", 24*time.Hour),
 		CookieSecure:    getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
+		CORSOrigins:     parseCSVEnv(lookup("CORS_ORIGINS")),
 
 		MidtransServerKey:    getEnv(lookup, "MIDTRANS_SERVER_KEY", ""),
 		MidtransSignatureKey: getEnv(lookup, "MIDTRANS_SIGNATURE_KEY", ""),
@@ -209,6 +211,20 @@ func getEnv(lookup func(string) string, key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func parseCSVEnv(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func getEnvAsInt(lookup func(string) string, key string, defaultVal int) int {

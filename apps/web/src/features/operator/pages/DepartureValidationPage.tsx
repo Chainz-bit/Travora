@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { BookingViewModel } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import {
+  bookingApiService,
+  type BookingRecord,
+} from '../../member/services/bookingApiService';
 import {
   CheckCircle2Icon,
   SearchIcon,
@@ -25,18 +26,39 @@ export interface DepartureValidationPageProps {
 }
 
 export function DepartureValidationPage() {
-  useSharedStore();
   const toast = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'ready' | 'completed'>('all');
 
-  const [bookingToValidate, setBookingToValidate] = useState<BookingViewModel | null>(null);
+  const [bookings, setBookings] = useState<BookingRecord[]>([]);
+  const [bookingToValidate, setBookingToValidate] = useState<BookingRecord | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const bookings: BookingViewModel[] = sharedStore.getBookings();
+  useEffect(() => {
+    let active = true;
+    bookingApiService
+      .getOperatorBookings()
+      .then((list) => {
+        if (!active) return;
+        setBookings(list);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFeedbackMessage({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Gagal memuat daftar pesanan keberangkatan.',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredBookings = useMemo(() => {
     let result = bookings;
@@ -63,33 +85,35 @@ export function DepartureValidationPage() {
     return result;
   }, [bookings, statusFilter, searchQuery]);
 
-  const handleOpenValidate = (b: BookingViewModel) => {
+  const handleOpenValidate = (b: BookingRecord) => {
     setBookingToValidate(b);
     setConfirmModalOpen(true);
   };
 
-  const handleConfirmValidation = () => {
+  const handleConfirmValidation = async () => {
     if (!bookingToValidate) return;
     setIsProcessing(true);
 
-    const res = sharedStore.validateDeparture(bookingToValidate.id);
-    setIsProcessing(false);
-
-    if (!res.success) {
-      toast.error(res.error || 'Gagal memvalidasi keberangkatan.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal memvalidasi keberangkatan.' });
-    } else {
+    try {
+      await bookingApiService.validateDeparture(bookingToValidate.id);
+      const updated = await bookingApiService.getOperatorBookings();
+      setBookings(updated);
       const msg = `Keberangkatan tiket ${bookingToValidate.id} (Penumpang: ${bookingToValidate.memberName}, Kursi ${bookingToValidate.seatNumber}) BERHASIL DIVALIDASI.`;
       toast.success(msg);
       setFeedbackMessage({
         type: 'success',
         text: `${msg} Tiket telah ditandai Keberangkatan Tervalidasi (Sudah Check-in).`,
       });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal memvalidasi keberangkatan.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsProcessing(false);
+      setConfirmModalOpen(false);
+      setBookingToValidate(null);
+      setTimeout(() => setFeedbackMessage(null), 5000);
     }
-
-    setConfirmModalOpen(false);
-    setBookingToValidate(null);
-    setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
   return (

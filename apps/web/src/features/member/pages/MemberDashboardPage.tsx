@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { BookingViewModel } from '../../../types/index';
 import { authService } from '../../auth/services/authService';
-import { mockBookingService } from '../services/mockBookingService';
+import {
+  bookingApiService,
+  type BookingRecord,
+} from '../services/bookingApiService';
 import { MemberLayout } from '../components/MemberLayout';
 import { Button } from '../../../components/ui/Button';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
@@ -28,15 +30,39 @@ export interface MemberDashboardPageProps {
 
 export function MemberDashboardPage({ onNavigate }: MemberDashboardPageProps) {
   const user = authService.getCurrentUser();
-  const [selectedTicket, setSelectedTicket] = useState<BookingViewModel | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<BookingRecord | null>(null);
+  const [allBookings, setAllBookings] = useState<BookingRecord[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    bookingApiService
+      .getMyBookings()
+      .then((list) => {
+        if (!active) return;
+        setAllBookings(list);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAllBookings([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const activeBookings = useMemo(() => {
-    return mockBookingService.getActiveBookings(user?.id);
-  }, [user?.id]);
+    return allBookings.filter((b) => b.status === 'terkonfirmasi');
+  }, [allBookings]);
 
   const metrics = useMemo(() => {
-    return mockBookingService.getMetrics(user?.id);
-  }, [user?.id]);
+    return {
+      activeTicketsCount: allBookings.filter((b) => b.status === 'terkonfirmasi').length,
+      pendingPaymentCount: allBookings.filter(
+        (b) => b.status === 'menunggu_pembayaran' || b.status === 'menunggu_verifikasi'
+      ).length,
+      totalTripsCount: allBookings.length,
+    };
+  }, [allBookings]);
 
   return (
     <MemberLayout currentPath="/member" onNavigate={onNavigate}>
@@ -217,14 +243,24 @@ export function MemberDashboardPage({ onNavigate }: MemberDashboardPageProps) {
                       </span>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedTicket(ticket)}
-                      leftIcon={<EyeIcon className="size-3.5" />}
-                    >
-                      Lihat Detail
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedTicket(ticket)}
+                        leftIcon={<EyeIcon className="size-3.5" />}
+                      >
+                        Detail
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => onNavigate('/tickets')}
+                        leftIcon={<TicketIcon className="size-3.5" />}
+                      >
+                        E-Tiket
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}

@@ -1,8 +1,7 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { ComplaintViewModel, ComplaintStatus } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import { adminApiService } from '../services/adminApiService';
+import type { ComplaintRecord } from '../../member/services/bookingApiService';
 import {
   MessageSquareIcon,
   SearchIcon,
@@ -24,21 +23,39 @@ export interface AdminComplaintsPageProps {
   onNavigate?: (path: RoutePath) => void;
 }
 
+type ComplaintStatusFilter = 'all' | 'diajukan' | 'diproses' | 'selesai';
+
 export function AdminComplaintsPage() {
-  useSharedStore();
   const toast = useToast();
 
+  const [complaints, setComplaints] = useState<ComplaintRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | ComplaintStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<ComplaintStatusFilter>('all');
 
-  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintViewModel | null>(null);
+  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintRecord | null>(null);
   const [replyText, setReplyText] = useState('');
-  const [replyStatus, setReplyStatus] = useState<ComplaintStatus>('selesai');
+  const [replyStatus, setReplyStatus] = useState<'diproses' | 'selesai'>('selesai');
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replyModalOpen, setReplyModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
-  const complaints: ComplaintViewModel[] = sharedStore.getComplaints();
+  useEffect(() => {
+    let active = true;
+    adminApiService
+      .getComplaints()
+      .then((list) => {
+        if (!active) return;
+        setComplaints(list);
+      })
+      .catch(() => {
+        if (!active) return;
+        setComplaints([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredComplaints = useMemo(() => {
     let result = complaints;
@@ -61,15 +78,15 @@ export function AdminComplaintsPage() {
     return result;
   }, [complaints, statusFilter, searchQuery]);
 
-  const handleOpenReplyModal = (c: ComplaintViewModel) => {
+  const handleOpenReplyModal = (c: ComplaintRecord) => {
     setSelectedComplaint(c);
     setReplyText(c.adminResponse || '');
-    setReplyStatus(c.status === 'diajukan' ? 'diproses' : c.status);
+    setReplyStatus(c.status === 'selesai' ? 'selesai' : 'diproses');
     setReplyError(null);
     setReplyModalOpen(true);
   };
 
-  const handleReplySubmit = (e: FormEvent) => {
+  const handleReplySubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedComplaint) return;
     setReplyError(null);
@@ -79,20 +96,23 @@ export function AdminComplaintsPage() {
       return;
     }
 
-    const res = sharedStore.replyComplaint(selectedComplaint.id, {
-      adminResponse: replyText.trim(),
-      status: replyStatus,
-    });
-
-    if (!res.success) {
-      setReplyError(res.error || 'Gagal menyimpan tanggapan keluhan.');
-      return;
+    setIsSubmitting(true);
+    try {
+      await adminApiService.replyComplaint(selectedComplaint.dbId, {
+        adminResponse: replyText.trim(),
+        status: replyStatus,
+      });
+      const updated = await adminApiService.getComplaints();
+      setComplaints(updated);
+      const msg = `Tanggapan resmi admin untuk keluhan ${selectedComplaint.id} berhasil dikirim dan tersinkronisasi ke portal Member.`;
+      toast.success(msg);
+      setFeedbackMessage(msg);
+      setReplyModalOpen(false);
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Gagal menyimpan tanggapan keluhan.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const msg = `Tanggapan resmi admin untuk keluhan ${selectedComplaint.id} berhasil dikirim dan tersinkronisasi ke portal Member.`;
-    toast.success(msg);
-    setFeedbackMessage(msg);
-    setReplyModalOpen(false);
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
@@ -342,7 +362,7 @@ export function AdminComplaintsPage() {
               <Select
                 label="Perbarui Status Keluhan"
                 value={replyStatus}
-                onChange={(e) => setReplyStatus(e.target.value as ComplaintStatus)}
+                onChange={(e) => setReplyStatus(e.target.value as 'diproses' | 'selesai')}
                 options={[
                   { value: 'diproses', label: 'Diproses (Sedang ditindaklanjuti)' },
                   { value: 'selesai', label: 'Selesai (Keluhan telah tuntas)' },
@@ -351,10 +371,10 @@ export function AdminComplaintsPage() {
             </div>
 
             <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2.5 pt-3 border-t border-stone-200">
-              <Button type="button" variant="outline" onClick={() => setReplyModalOpen(false)}>
+              <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => setReplyModalOpen(false)}>
                 Batal
               </Button>
-              <Button type="submit" variant="primary">
+              <Button type="submit" variant="primary" isLoading={isSubmitting}>
                 Kirim Tanggapan Resmi
               </Button>
             </div>

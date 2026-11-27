@@ -1,8 +1,6 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { VehicleEntity, VehicleFormValues } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import { adminApiService, type AdminVehicle } from '../services/adminApiService';
 import {
   BusIcon,
   PlusIcon,
@@ -14,7 +12,6 @@ import {
 } from '../../../components/ui/Icons';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
-import { Select } from '../../../components/ui/Select';
 import { Modal } from '../../../components/ui/Modal';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -25,23 +22,42 @@ export interface VehiclesManagementPageProps {
 }
 
 export function VehiclesManagementPage() {
-  useSharedStore();
   const toast = useToast();
 
+  const [vehicles, setVehicles] = useState<AdminVehicle[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingVehicle, setEditingVehicle] = useState<VehicleEntity | null>(null);
+  const [editingVehicle, setEditingVehicle] = useState<AdminVehicle | null>(null);
 
   const [formName, setFormName] = useState('');
   const [formPlate, setFormPlate] = useState('');
-  const [formStatus, setFormStatus] = useState<'aktif' | 'perawatan'>('aktif');
+  const [formColor, setFormColor] = useState('Hitam');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [vehicleToDelete, setVehicleToDelete] = useState<VehicleEntity | null>(null);
+  const [vehicleToDelete, setVehicleToDelete] = useState<AdminVehicle | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const vehicles: VehicleEntity[] = sharedStore.getVehicles();
+  useEffect(() => {
+    let active = true;
+    adminApiService
+      .getVehicles()
+      .then((list) => {
+        if (!active) return;
+        setVehicles(list);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFeedbackMessage({
+          type: 'error',
+          text: err instanceof Error ? err.message : 'Gagal memuat data kendaraan.',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredVehicles = useMemo(() => {
     if (!searchQuery.trim()) return vehicles;
@@ -50,6 +66,7 @@ export function VehiclesManagementPage() {
       (v) =>
         v.name.toLowerCase().includes(q) ||
         v.plateNumber.toLowerCase().includes(q) ||
+        v.color.toLowerCase().includes(q) ||
         v.id.toLowerCase().includes(q)
     );
   }, [vehicles, searchQuery]);
@@ -58,89 +75,93 @@ export function VehiclesManagementPage() {
     setEditingVehicle(null);
     setFormName('');
     setFormPlate('');
-    setFormStatus('aktif');
+    setFormColor('Hitam');
     setFormError(null);
     setModalOpen(true);
   };
 
-  const handleOpenEdit = (v: VehicleEntity) => {
+  const handleOpenEdit = (v: AdminVehicle) => {
     setEditingVehicle(v);
     setFormName(v.name);
     setFormPlate(v.plateNumber);
-    setFormStatus(v.status);
+    setFormColor(v.color || 'Hitam');
     setFormError(null);
     setModalOpen(true);
   };
 
-  const handleFormSubmit = (e: FormEvent) => {
+  const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    const values: VehicleFormValues = {
+    const payload = {
       name: formName.trim(),
       plateNumber: formPlate.trim().toUpperCase(),
-      status: formStatus,
+      color: formColor.trim() || 'Hitam',
     };
 
-    if (!values.name) {
+    if (!payload.name) {
       setFormError('Nama / jenis kendaraan wajib diisi.');
       return;
     }
-    if (!values.plateNumber) {
+    if (!payload.plateNumber) {
       setFormError('Nomor plat kendaraan wajib diisi.');
       return;
     }
 
-    if (editingVehicle) {
-      const res = sharedStore.updateVehicle(editingVehicle.id, values);
-      if (!res.success) {
-        setFormError(res.error || 'Gagal memperbarui kendaraan.');
-        return;
+    setIsSubmitting(true);
+    try {
+      if (editingVehicle) {
+        await adminApiService.updateVehicle(editingVehicle.id, payload);
+        toast.success(`Data kendaraan "${payload.name}" (${payload.plateNumber}) berhasil diperbarui.`);
+        setFeedbackMessage({
+          type: 'success',
+          text: `Data kendaraan "${payload.name}" (${payload.plateNumber}) berhasil diperbarui.`,
+        });
+      } else {
+        await adminApiService.createVehicle(payload);
+        toast.success(`Armada baru "${payload.name}" (${payload.plateNumber}) berhasil ditambahkan.`);
+        setFeedbackMessage({
+          type: 'success',
+          text: `Armada baru "${payload.name}" (${payload.plateNumber}) berhasil ditambahkan.`,
+        });
       }
-      toast.success(`Data kendaraan "${values.name}" (${values.plateNumber}) berhasil diperbarui.`);
-      setFeedbackMessage({
-        type: 'success',
-        text: `Data kendaraan "${values.name}" (${values.plateNumber}) berhasil diperbarui.`,
-      });
-    } else {
-      const res = sharedStore.addVehicle(values);
-      if (!res.success) {
-        setFormError(res.error || 'Gagal menambahkan kendaraan baru.');
-        return;
-      }
-      toast.success(`Armada baru "${values.name}" (${values.plateNumber}) berhasil ditambahkan.`);
-      setFeedbackMessage({
-        type: 'success',
-        text: `Armada baru "${values.name}" (${values.plateNumber}) berhasil ditambahkan.`,
-      });
+      const updated = await adminApiService.getVehicles();
+      setVehicles(updated);
+      setModalOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Gagal menyimpan data kendaraan.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setModalOpen(false);
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const handleOpenDelete = (v: VehicleEntity) => {
+  const handleOpenDelete = (v: AdminVehicle) => {
     setVehicleToDelete(v);
     setDeleteModalOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!vehicleToDelete) return;
-
-    const res = sharedStore.deleteVehicle(vehicleToDelete.id);
-    if (!res.success) {
-      toast.error(res.error || 'Gagal menghapus kendaraan.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal menghapus kendaraan.' });
-    } else {
+    setIsSubmitting(true);
+    try {
+      await adminApiService.deleteVehicle(vehicleToDelete.id);
+      const updated = await adminApiService.getVehicles();
+      setVehicles(updated);
       toast.success(`Kendaraan "${vehicleToDelete.name}" (${vehicleToDelete.plateNumber}) berhasil dihapus.`);
       setFeedbackMessage({
         type: 'success',
         text: `Kendaraan "${vehicleToDelete.name}" (${vehicleToDelete.plateNumber}) berhasil dihapus.`,
       });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menghapus kendaraan.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsSubmitting(false);
+      setDeleteModalOpen(false);
+      setVehicleToDelete(null);
     }
-
-    setDeleteModalOpen(false);
-    setVehicleToDelete(null);
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
@@ -329,22 +350,20 @@ export function VehiclesManagementPage() {
           </div>
 
           <div>
-            <Select
-              label="Status Operasional Armada"
-              value={formStatus}
-              onChange={(e) => setFormStatus(e.target.value as 'aktif' | 'perawatan')}
-              options={[
-                { value: 'aktif', label: 'Aktif Beroperasi' },
-                { value: 'perawatan', label: 'Dalam Perawatan / Bengkel' },
-              ]}
+            <Input
+              label="Warna Armada"
+              placeholder="Contoh: Hitam, Putih, Silver"
+              value={formColor}
+              onChange={(e) => setFormColor(e.target.value)}
+              required
             />
           </div>
 
           <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2.5 pt-3 border-t border-stone-200">
-            <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>
+            <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => setModalOpen(false)}>
               Batal
             </Button>
-            <Button type="submit" variant="primary">
+            <Button type="submit" variant="primary" isLoading={isSubmitting}>
               {editingVehicle ? 'Simpan Perubahan' : 'Tambah Kendaraan'}
             </Button>
           </div>

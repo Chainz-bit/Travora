@@ -1,8 +1,11 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { ScheduleEntity, ScheduleFormValues } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import {
+  adminApiService,
+  type AdminCity,
+  type AdminSchedule,
+  type AdminVehicle,
+} from '../services/adminApiService';
 import {
   CalendarIcon,
   PlusIcon,
@@ -19,21 +22,25 @@ import { Modal } from '../../../components/ui/Modal';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { useToast } from '../../../components/ui/useToast';
-import { formatRupiah } from '../../../lib/utils';
+import { formatRupiah, getTodayDateString } from '../../../lib/utils';
 
 export interface SchedulesManagementPageProps {
   onNavigate?: (path: RoutePath) => void;
 }
 
 export function SchedulesManagementPage() {
-  useSharedStore();
   const toast = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
+  const [originCities, setOriginCities] = useState<AdminCity[]>([]);
+  const [destinationCities, setDestinationCities] = useState<AdminCity[]>([]);
+  const [vehicles, setVehicles] = useState<AdminVehicle[]>([]);
+  const [scheduleEntities, setScheduleEntities] = useState<AdminSchedule[]>([]);
+
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState<ScheduleEntity | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<AdminSchedule | null>(null);
 
   // Form states
   const [originCityId, setOriginCityId] = useState('');
@@ -44,35 +51,46 @@ export function SchedulesManagementPage() {
   const [price, setPrice] = useState<number | ''>('');
   const [isActive, setIsActive] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [scheduleToDelete, setScheduleToDelete] = useState<ScheduleEntity | null>(null);
+  const [scheduleToDelete, setScheduleToDelete] = useState<AdminSchedule | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Master data for dropdowns
-  const originCities = sharedStore.getOriginCities();
-  const destinationCities = sharedStore.getDestinationCities();
-  const vehicles = sharedStore.getVehicles();
-  const scheduleEntities = sharedStore.getScheduleEntities();
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      adminApiService.getCities('origin'),
+      adminApiService.getCities('destination'),
+      adminApiService.getVehicles(),
+      adminApiService.getSchedules(),
+    ])
+      .then(([orig, dest, vehs, scheds]) => {
+        if (!active) return;
+        setOriginCities(orig);
+        setDestinationCities(dest);
+        setVehicles(vehs);
+        setScheduleEntities(scheds);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFeedbackMessage({
+          type: 'error',
+          text: err instanceof Error ? err.message : 'Gagal memuat data jadwal dari server.',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  // Enriched schedules for table view
   const enrichedSchedules = useMemo(() => {
-    return scheduleEntities.map((sch) => {
-      const origin = originCities.find((c) => c.id === sch.originCityId);
-      const dest = destinationCities.find((c) => c.id === sch.destinationCityId);
-      const vehicle = vehicles.find((v) => v.id === sch.vehicleId);
-
-      return {
-        ...sch,
-        originName: origin?.name || 'Kota Asal',
-        originCode: origin?.code || '---',
-        destName: dest?.name || 'Kota Tujuan',
-        destCode: dest?.code || '---',
-        vehicleName: vehicle?.name || 'Shuttle Travel',
-        vehiclePlate: vehicle?.plateNumber || 'D 0000 TRV',
-      };
-    });
-  }, [scheduleEntities, originCities, destinationCities, vehicles]);
+    return scheduleEntities.map((sch) => ({
+      ...sch,
+      originName: sch.originCityName,
+      destName: sch.destinationCityName,
+    }));
+  }, [scheduleEntities]);
 
   // Filtered schedules
   const filteredSchedules = useMemo(() => {
@@ -104,46 +122,44 @@ export function SchedulesManagementPage() {
     setOriginCityId(originCities[0]?.id || '');
     setDestinationCityId(destinationCities[1]?.id || destinationCities[0]?.id || '');
     setVehicleId(vehicles[0]?.id || '');
-    setDepartureDate(new Date().toISOString().split('T')[0]);
-    setDepartureTime('08:00 WIB');
+    setDepartureDate(getTodayDateString());
+    setDepartureTime('08:00');
     setPrice(135000);
     setIsActive(true);
     setFormError(null);
     setModalOpen(true);
   };
 
-  const handleOpenEdit = (sch: ScheduleEntity) => {
+  const handleOpenEdit = (sch: AdminSchedule) => {
     setEditingSchedule(sch);
     setOriginCityId(sch.originCityId);
     setDestinationCityId(sch.destinationCityId);
     setVehicleId(sch.vehicleId);
     setDepartureDate(sch.departureDate);
-    setDepartureTime(sch.departureTime);
+    setDepartureTime(sch.departureTime.replace(/\s*WIB$/i, ''));
     setPrice(sch.price);
     setIsActive(sch.isActive);
     setFormError(null);
     setModalOpen(true);
   };
 
-  const handleToggleActive = (id: string, currentStatus: boolean) => {
-    sharedStore.toggleScheduleActive(id);
-    const msg = `Status jadwal ${id} berhasil diubah menjadi ${!currentStatus ? 'Aktif' : 'Nonaktif'}.`;
-    toast.info(msg);
-    setFeedbackMessage({
-      type: 'success',
-      text: msg,
-    });
+  const handleToggleActive = async (id: string) => {
+    try {
+      const updated = await adminApiService.toggleScheduleActive(id);
+      const list = await adminApiService.getSchedules();
+      setScheduleEntities(list);
+      const msg = `Status jadwal #${id} berhasil diubah menjadi ${updated.isActive ? 'Aktif' : 'Nonaktif'}.`;
+      toast.info(msg);
+      setFeedbackMessage({ type: 'success', text: msg });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal mengubah status jadwal.');
+    }
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
 
-  const handleFormSubmit = (e: FormEvent) => {
+  const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
-
-    if (originCityId === destinationCityId) {
-      setFormError('Kota asal dan kota tujuan tidak boleh sama.');
-      return;
-    }
 
     const numPrice = Number(price);
     if (!numPrice || numPrice <= 0) {
@@ -151,76 +167,71 @@ export function SchedulesManagementPage() {
       return;
     }
 
-    let cleanTime = departureTime.trim();
-    if (!cleanTime.toLowerCase().includes('wib')) {
-      cleanTime = `${cleanTime} WIB`;
-    }
-
-    const values: ScheduleFormValues = {
-      originCityId,
-      destinationCityId,
-      vehicleId,
+    const payload = {
+      originCityId: Number(originCityId),
+      destinationCityId: Number(destinationCityId),
+      vehicleId: Number(vehicleId),
       departureDate,
-      departureTime: cleanTime,
+      departureTime: departureTime.trim(),
       price: numPrice,
       isActive,
     };
 
-    if (editingSchedule) {
-      const res = sharedStore.updateSchedule(editingSchedule.id, values);
-      if (!res.success) {
-        setFormError(res.error || 'Gagal memperbarui jadwal.');
-        return;
+    setIsSubmitting(true);
+    try {
+      if (editingSchedule) {
+        await adminApiService.updateSchedule(editingSchedule.id, payload);
+        toast.success(`Jadwal #${editingSchedule.id} berhasil diperbarui.`);
+        setFeedbackMessage({
+          type: 'success',
+          text: `Jadwal #${editingSchedule.id} berhasil diperbarui.`,
+        });
+      } else {
+        await adminApiService.createSchedule(payload);
+        toast.success(`Jadwal baru berhasil dibuat dan langsung tampil di pencarian publik.`);
+        setFeedbackMessage({
+          type: 'success',
+          text: `Jadwal baru berhasil dibuat dan langsung tersinkronisasi ke PostgreSQL.`,
+        });
       }
-      toast.success(`Jadwal ${editingSchedule.id} berhasil diperbarui.`);
-      setFeedbackMessage({
-        type: 'success',
-        text: `Jadwal ${editingSchedule.id} berhasil diperbarui.`,
-      });
-    } else {
-      const res = sharedStore.addSchedule(values);
-      if (!res.success) {
-        setFormError(res.error || 'Gagal menambahkan jadwal baru.');
-        return;
-      }
-      toast.success(`Jadwal baru berhasil dibuat dan langsung tampil di pencarian publik.`);
-      setFeedbackMessage({
-        type: 'success',
-        text: `Jadwal baru berhasil dibuat dan langsung tersinkronisasi ke pencarian publik.`,
-      });
+      const list = await adminApiService.getSchedules();
+      setScheduleEntities(list);
+      setModalOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Gagal menyimpan jadwal.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setModalOpen(false);
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const handleOpenDelete = (sch: ScheduleEntity) => {
+  const handleOpenDelete = (sch: AdminSchedule) => {
     setScheduleToDelete(sch);
     setDeleteModalOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!scheduleToDelete) return;
-
-    const res = sharedStore.deleteSchedule(scheduleToDelete.id);
-    if (!res.success) {
-      toast.error(res.error || 'Gagal menghapus jadwal.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal menghapus jadwal.' });
-    } else {
-      if (res.error) {
-        toast.info(res.error);
-        setFeedbackMessage({ type: 'success', text: res.error });
+    setIsSubmitting(true);
+    try {
+      const res = await adminApiService.deleteSchedule(scheduleToDelete.id);
+      const list = await adminApiService.getSchedules();
+      setScheduleEntities(list);
+      if (res.deactivated) {
+        toast.info(res.message);
       } else {
-        toast.success(`Jadwal ${scheduleToDelete.id} berhasil dihapus.`);
-        setFeedbackMessage({
-          type: 'success',
-          text: `Jadwal ${scheduleToDelete.id} berhasil dihapus dari sistem.`,
-        });
+        toast.success(res.message);
       }
+      setFeedbackMessage({ type: 'success', text: res.message });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menghapus jadwal.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsSubmitting(false);
+      setDeleteModalOpen(false);
+      setScheduleToDelete(null);
     }
-
-    setDeleteModalOpen(false);
-    setScheduleToDelete(null);
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
@@ -385,7 +396,7 @@ export function SchedulesManagementPage() {
                     <td className="py-3.5 px-6 text-center whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => handleToggleActive(sch.id, sch.isActive)}
+                        onClick={() => handleToggleActive(sch.id)}
                         className="cursor-pointer group"
                         title="Klik untuk beralih status aktif/nonaktif"
                       >
@@ -530,10 +541,10 @@ export function SchedulesManagementPage() {
           </div>
 
           <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2.5 pt-3 border-t border-stone-200">
-            <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>
+            <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => setModalOpen(false)}>
               Batal
             </Button>
-            <Button type="submit" variant="primary">
+            <Button type="submit" variant="primary" isLoading={isSubmitting}>
               {editingSchedule ? 'Simpan Perubahan' : 'Tambah Jadwal'}
             </Button>
           </div>

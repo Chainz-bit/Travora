@@ -1,13 +1,16 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { BookingViewModel, BookingStatus } from '../../../types/index';
-import { apiClient } from '../../../services/api';
+import {
+  bookingApiService,
+  type BookingRecord,
+  type BookingStatus,
+} from '../services/bookingApiService';
 import { MemberLayout } from '../components/MemberLayout';
 import { Button } from '../../../components/ui/Button';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Modal } from '../../../components/ui/Modal';
 import { EmptyState } from '../../../components/ui/EmptyState';
-import { LoadingState } from '../../../components/ui/LoadingState';
+import { useToast } from '../../../components/ui/useToast';
 import {
   TicketIcon,
   ArrowRightIcon,
@@ -23,24 +26,53 @@ export interface BookingHistoryPageProps {
 type FilterTab = 'semua' | BookingStatus;
 
 export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<FilterTab>('semua');
-  const [selectedBooking, setSelectedBooking] = useState<BookingViewModel | null>(null);
-  const [allBookings, setAllBookings] = useState<BookingViewModel[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [selectedBooking, setSelectedBooking] = useState<BookingRecord | null>(null);
+  const [bookingToCancel, setBookingToCancel] = useState<BookingRecord | null>(null);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [allBookings, setAllBookings] = useState<BookingRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const handleConfirmCancel = async () => {
+    if (!bookingToCancel) return;
+    setIsCanceling(true);
+    try {
+      await bookingApiService.cancelBooking(bookingToCancel.id);
+      const updated = await bookingApiService.getMyBookings();
+      setAllBookings(updated);
+      toast.success(`Pesanan ${bookingToCancel.id} berhasil dibatalkan dan kursi telah dibuka kembali.`);
+      setBookingToCancel(null);
+      if (selectedBooking?.id === bookingToCancel.id) {
+        setSelectedBooking(null);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal membatalkan pesanan.');
+    } finally {
+      setIsCanceling(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    apiClient
+    bookingApiService
       .getMyBookings()
-      .then((rows) => {
-        if (active) setAllBookings(rows);
+      .then((list) => {
+        if (!active) return;
+        setAllBookings(list);
+        setLoadError(null);
       })
-      .catch(() => {
-        if (active) setAllBookings([]);
+      .catch((err) => {
+        if (!active) return;
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : 'Gagal memuat riwayat pemesanan tiket.',
+        );
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setIsLoading(false);
       });
     return () => {
       active = false;
@@ -116,6 +148,18 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
           </Button>
         </div>
 
+        {loadError && (
+          <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-xs text-red-700">
+            {loadError}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="rounded-xl bg-stone-50 border border-stone-200 p-4 text-xs text-stone-500">
+            Memuat riwayat pemesanan tiket dari server...
+          </div>
+        )}
+
         {/* Filter Tabs */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-stone-200">
           {tabs.map((tab) => {
@@ -147,11 +191,7 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
         </div>
 
         {/* Content Table / Cards */}
-        {loading ? (
-          <div className="bg-white rounded-2xl border border-stone-200 p-10">
-            <LoadingState message="Memuat riwayat pemesanan..." />
-          </div>
-        ) : filteredBookings.length === 0 ? (
+        {filteredBookings.length === 0 ? (
           <div className="bg-white rounded-2xl border border-stone-200 p-8">
             <EmptyState
               icon={<TicketIcon className="size-7 text-control-border" />}
@@ -213,15 +253,35 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
                       <td className="px-5 py-3 text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-2 whitespace-nowrap">
                           {b.status === 'menunggu_pembayaran' && (
+                            <>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() =>
+                                  onNavigate('/member/payment-confirmation', { bookingId: b.id })
+                                }
+                                leftIcon={<CreditCardIcon className="size-3.5" />}
+                              >
+                                Bayar
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setBookingToCancel(b)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                Batalkan
+                              </Button>
+                            </>
+                          )}
+                          {b.status === 'terkonfirmasi' && (
                             <Button
                               variant="primary"
                               size="sm"
-                              onClick={() =>
-                                onNavigate('/member/payment-confirmation', { bookingId: b.id })
-                              }
-                              leftIcon={<CreditCardIcon className="size-3.5" />}
+                              onClick={() => onNavigate('/tickets', { order_code: b.id })}
+                              leftIcon={<TicketIcon className="size-3.5" />}
                             >
-                              Bayar
+                              E-Tiket
                             </Button>
                           )}
                           <Button
@@ -288,15 +348,35 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
 
                     <div className="flex items-center gap-2">
                       {b.status === 'menunggu_pembayaran' && (
+                        <>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              onNavigate('/member/payment-confirmation', { bookingId: b.id })
+                            }
+                            className="text-xs h-8 px-3"
+                          >
+                            Bayar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setBookingToCancel(b)}
+                            className="text-xs h-8 px-2.5 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            Batal
+                          </Button>
+                        </>
+                      )}
+                      {b.status === 'terkonfirmasi' && (
                         <Button
                           variant="primary"
                           size="sm"
-                          onClick={() =>
-                            onNavigate('/member/payment-confirmation', { bookingId: b.id })
-                          }
+                          onClick={() => onNavigate('/tickets', { order_code: b.id })}
                           className="text-xs h-8 px-3"
                         >
-                          Bayar
+                          E-Tiket
                         </Button>
                       )}
                       <Button
@@ -394,23 +474,90 @@ export function BookingHistoryPage({ onNavigate }: BookingHistoryPageProps) {
                 Tutup
               </Button>
               {selectedBooking.status === 'menunggu_pembayaran' && (
+                <>
+                  <Button
+                    variant="danger"
+                    onClick={() => setBookingToCancel(selectedBooking)}
+                    className="text-xs"
+                  >
+                    Batalkan Pesanan
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      const id = selectedBooking.id;
+                      setSelectedBooking(null);
+                      onNavigate('/member/payment-confirmation', { bookingId: id });
+                    }}
+                    className="text-xs"
+                  >
+                    <CreditCardIcon className="size-3.5 mr-1.5" />
+                    Konfirmasi Pembayaran
+                  </Button>
+                </>
+              )}
+              {selectedBooking.status === 'terkonfirmasi' && (
                 <Button
                   variant="primary"
                   onClick={() => {
                     const id = selectedBooking.id;
                     setSelectedBooking(null);
-                    onNavigate('/member/payment-confirmation', { bookingId: id });
+                    onNavigate('/tickets', { order_code: id });
                   }}
                   className="text-xs"
                 >
-                  <CreditCardIcon className="size-3.5 mr-1.5" />
-                  Konfirmasi Pembayaran
+                  <TicketIcon className="size-3.5 mr-1.5" />
+                  Lihat E-Tiket QR
                 </Button>
               )}
             </div>
           </div>
         </Modal>
       )}
+
+      {/* Cancel Booking Confirmation Modal */}
+      <Modal
+        isOpen={!!bookingToCancel}
+        onClose={() => !isCanceling && setBookingToCancel(null)}
+        title="Konfirmasi Pembatalan Pesanan"
+        description="Pesanan yang dibatalkan tidak dapat dikembalikan dan nomor kursi akan dibuka untuk penumpang lain."
+      >
+        {bookingToCancel && (
+          <div className="space-y-4 pt-2">
+            <div className="bg-stone-50 border border-stone-200 rounded-xl p-3.5 text-xs space-y-1">
+              <p>
+                <strong>Kode Tiket:</strong>{' '}
+                <span className="font-mono text-primary">{bookingToCancel.id}</span>
+              </p>
+              <p>
+                <strong>Rute:</strong> {bookingToCancel.schedule.originCityName} &rarr;{' '}
+                {bookingToCancel.schedule.destinationCityName}
+              </p>
+              <p>
+                <strong>Kursi:</strong> No. {bookingToCancel.seatNumber}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isCanceling}
+                onClick={() => setBookingToCancel(null)}
+              >
+                Kembali
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                isLoading={isCanceling}
+                onClick={handleConfirmCancel}
+              >
+                Ya, Batalkan Pesanan
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </MemberLayout>
   );
 }

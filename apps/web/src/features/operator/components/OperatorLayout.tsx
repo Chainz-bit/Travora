@@ -10,6 +10,7 @@ import {
   XIcon,
   BusIcon,
   UserIcon,
+  QrCodeIcon,
 } from '../../../components/ui/Icons';
 import { cn } from '../../../lib/utils';
 
@@ -43,13 +44,14 @@ export function OperatorLayout({
 
   const handleLogout = async () => {
     await authService.logout();
-    onNavigate('/login');
+    onNavigate('/operator/login');
   };
 
   const navItems: { label: string; path: RoutePath; icon: typeof LayoutDashboardIcon }[] = [
     { label: 'Dashboard Operator', path: '/operator', icon: LayoutDashboardIcon },
     { label: 'Verifikasi Transfer', path: '/operator/confirmations', icon: ReceiptIcon },
     { label: 'Validasi Keberangkatan', path: '/operator/validation', icon: CheckCircle2Icon },
+    { label: 'Scan E-Tiket', path: '/operator/scan', icon: QrCodeIcon },
   ];
 
   return (

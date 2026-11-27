@@ -18,10 +18,13 @@ export type RoutePath =
   | '/admin/vehicles'
   | '/admin/schedules'
   | '/admin/complaints'
+  | '/admin/operators'
   | '/operator/login'
   | '/operator'
   | '/operator/confirmations'
-  | '/operator/validation';
+  | '/operator/validation'
+  | '/operator/scan'
+  | '/tickets';
 
 function parseCurrentPath(): RoutePath {
   if (typeof window === 'undefined') return '/';
@@ -34,12 +37,14 @@ function parseCurrentPath(): RoutePath {
   if (pathname.startsWith('/admin/vehicles')) return '/admin/vehicles';
   if (pathname.startsWith('/admin/schedules')) return '/admin/schedules';
   if (pathname.startsWith('/admin/complaints')) return '/admin/complaints';
+  if (pathname.startsWith('/admin/operators')) return '/admin/operators';
   if (pathname.startsWith('/admin')) return '/admin';
 
   // Operator routes
   if (pathname.startsWith('/operator/login')) return '/operator/login';
   if (pathname.startsWith('/operator/confirmations')) return '/operator/confirmations';
   if (pathname.startsWith('/operator/validation')) return '/operator/validation';
+  if (pathname.startsWith('/operator/scan')) return '/operator/scan';
   if (pathname.startsWith('/operator')) return '/operator';
 
   // Member routes
@@ -50,6 +55,7 @@ function parseCurrentPath(): RoutePath {
   if (pathname.startsWith('/member')) return '/member';
 
   // Public & Auth routes
+  if (pathname.startsWith('/tickets')) return '/tickets';
   if (pathname.startsWith('/login')) return '/login';
   if (pathname.startsWith('/register')) return '/register';
   if (pathname.startsWith('/schedules')) return '/schedules';

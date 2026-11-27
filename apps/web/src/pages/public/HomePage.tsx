@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SearchForm } from '../../features/schedule/components/SearchForm';
+import { apiClient } from '../../services/api';
+import { getTodayDateString } from '../../lib/utils';
 import {
   ShieldCheckIcon,
   ClockIcon,
@@ -8,7 +10,7 @@ import {
   CheckIcon,
   SparklesIcon,
 } from '../../components/ui/Icons';
-import type { SearchTicketFormValues } from '../../types';
+import type { CityOption, SearchTicketFormValues } from '../../types';
 
 export interface HomePageProps {
   onSearch: (values: SearchTicketFormValues) => void;
@@ -16,18 +18,50 @@ export interface HomePageProps {
 }
 
 export function HomePage({ onSearch }: HomePageProps) {
+  const [originCities, setOriginCities] = useState<CityOption[]>([]);
+  const [destCities, setDestCities] = useState<CityOption[]>([]);
   const [selectedRouteValues, setSelectedRouteValues] = useState<Partial<SearchTicketFormValues>>({
-    originCityId: '101',
-    destinationCityId: '201',
-    departureDate: '2026-11-13',
+    originCityId: '',
+    destinationCityId: '',
+    departureDate: getTodayDateString(),
   });
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([apiClient.getOriginCities(), apiClient.getDestinationCities()])
+      .then(([origins, dests]) => {
+        if (!active) return;
+        setOriginCities(origins);
+        setDestCities(dests);
+      })
+      .catch(() => {
+        // SearchForm akan menangani pesan error koneksi API
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [notification, setNotification] = useState<string | null>(null);
 
-  function handleSelectRoute(originId: string, destinationId: string, routeLabel: string) {
+  function handleSelectRoute(
+    fallbackOriginId: string,
+    fallbackDestId: string,
+    routeLabel: string,
+    originKeyword?: string,
+    destKeyword?: string,
+  ) {
+    const matchedOrigin = originKeyword
+      ? originCities.find((c) => c.name.toLowerCase().includes(originKeyword.toLowerCase()))
+      : undefined;
+    const matchedDest = destKeyword
+      ? destCities.find((c) => c.name.toLowerCase().includes(destKeyword.toLowerCase()))
+      : undefined;
+
     setSelectedRouteValues({
-      originCityId: originId,
-      destinationCityId: destinationId,
+      originCityId: matchedOrigin?.id || originCities[0]?.id || fallbackOriginId,
+      destinationCityId: matchedDest?.id || destCities[0]?.id || fallbackDestId,
+      departureDate: getTodayDateString(),
     });
     setNotification(`Rute ${routeLabel} telah dipilih pada formulir pencarian.`);
 
@@ -242,7 +276,7 @@ export function HomePage({ onSearch }: HomePageProps) {
 
                 <button
                   type="button"
-                  onClick={() => handleSelectRoute('101', '201', 'Bandung — Jakarta')}
+                  onClick={() => handleSelectRoute('101', '201', 'Bandung — Jakarta', 'bandung', 'jakarta')}
                   className="px-4 py-2.5 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-hover transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
                 >
                   Pilih Rute Ini <ArrowRightIcon className="size-3.5" />
@@ -273,7 +307,7 @@ export function HomePage({ onSearch }: HomePageProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleSelectRoute('102', '202', 'Jakarta — Bandung')}
+                    onClick={() => handleSelectRoute('102', '202', 'Jakarta — Bandung', 'jakarta', 'bandung')}
                     className="size-8 rounded-lg bg-stone-100 hover:bg-primary hover:text-white text-stone-700 flex items-center justify-center transition-colors cursor-pointer"
                     title="Pilih rute Jakarta - Bandung"
                   >
@@ -303,7 +337,7 @@ export function HomePage({ onSearch }: HomePageProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleSelectRoute('101', '204', 'Bandung — Yogyakarta')}
+                    onClick={() => handleSelectRoute('101', '204', 'Bandung — Yogyakarta', 'bandung', 'yogyakarta')}
                     className="size-8 rounded-lg bg-stone-100 hover:bg-primary hover:text-white text-stone-700 flex items-center justify-center transition-colors cursor-pointer"
                     title="Pilih rute Bandung - Yogyakarta"
                   >
@@ -333,7 +367,7 @@ export function HomePage({ onSearch }: HomePageProps) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleSelectRoute('103', '203', 'Yogyakarta — Surabaya')}
+                    onClick={() => handleSelectRoute('103', '203', 'Yogyakarta — Surabaya', 'yogyakarta', 'surabaya')}
                     className="size-8 rounded-lg bg-stone-100 hover:bg-primary hover:text-white text-stone-700 flex items-center justify-center transition-colors cursor-pointer"
                     title="Pilih rute Yogyakarta - Surabaya"
                   >

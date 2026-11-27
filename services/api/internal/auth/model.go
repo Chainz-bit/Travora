@@ -10,10 +10,12 @@ const (
 )
 
 var (
-	ErrInvalidInput       = errors.New("role, identifier, dan kata sandi wajib diisi")
-	ErrInvalidCredentials = errors.New("kredensial login tidak valid")
-	ErrUnauthorized       = errors.New("sesi tidak valid atau telah kedaluwarsa")
-	ErrUserNotFound       = errors.New("pengguna tidak ditemukan")
+	ErrInvalidInput              = errors.New("role, identifier, dan kata sandi wajib diisi")
+	ErrInvalidCredentials        = errors.New("kredensial login tidak valid")
+	ErrUnauthorized              = errors.New("sesi tidak valid atau telah kedaluwarsa")
+	ErrUserNotFound              = errors.New("pengguna tidak ditemukan")
+	ErrForbiddenRoleRegistration = errors.New("registrasi publik hanya diizinkan untuk akun member")
+	ErrUsernameExists            = errors.New("email atau username sudah terdaftar, silakan masuk ke akun Anda")
 )
 
 // User merepresentasikan profil pengguna terautentikasi (aman tanpa password hash).
@@ -45,6 +47,7 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 	Address  string `json:"address,omitempty"`
 	Gender   string `json:"gender,omitempty"`
+	Role     string `json:"role,omitempty"`
 }
 
 // SessionClaims menyimpan data sesi terenkripsi/tertanda tangan HMAC.

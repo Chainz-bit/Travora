@@ -4,6 +4,7 @@
  */
 
 import type { BookingStatus, BookingViewModel, CityOption, ScheduleViewModel } from '../types/index';
+import { getAuthHeaders } from '../pages/tickets/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
@@ -138,10 +139,9 @@ class ApiError extends Error {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
 
-  const headers: HeadersInit = {
-    'Accept': 'application/json',
-    ...(options.headers || {}),
-  };
+  const headers: HeadersInit = getAuthHeaders(
+    (options.headers as Record<string, string> | undefined) || undefined
+  );
 
   let response: Response;
   try {

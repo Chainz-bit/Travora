@@ -33,6 +33,7 @@ export function Navbar({ currentPath, onNavigate }: NavbarProps) {
   const navLinks = [
     { label: 'Beranda', path: '/' as RoutePath },
     { label: 'Jadwal Perjalanan', path: '/schedules' as RoutePath },
+    { label: 'E-Tiket Saya', path: '/tickets' as RoutePath },
   ];
 
   return (

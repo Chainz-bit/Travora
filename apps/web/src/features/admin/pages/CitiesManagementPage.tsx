@@ -1,8 +1,6 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { CityEntity, CityFormValues } from '../../../types/index';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import { adminApiService, type AdminCity } from '../services/adminApiService';
 import {
   BuildingIcon,
   MapPinIcon,
@@ -25,7 +23,6 @@ export interface CitiesManagementPageProps {
 }
 
 export function CitiesManagementPage({ type }: CitiesManagementPageProps) {
-  useSharedStore();
   const toast = useToast();
 
   const isOrigin = type === 'origin';
@@ -34,20 +31,37 @@ export function CitiesManagementPage({ type }: CitiesManagementPageProps) {
     ? 'Kelola daftar kota titik keberangkatan travel resmi.'
     : 'Kelola daftar kota destinasi perjalanan travel resmi.';
 
+  const [cities, setCities] = useState<AdminCity[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingCity, setEditingCity] = useState<CityEntity | null>(null);
+  const [editingCity, setEditingCity] = useState<AdminCity | null>(null);
   const [formName, setFormName] = useState('');
-  const [formCode, setFormCode] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [cityToDelete, setCityToDelete] = useState<CityEntity | null>(null);
+  const [cityToDelete, setCityToDelete] = useState<AdminCity | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const cities: CityEntity[] = useMemo(() => {
-    return isOrigin ? sharedStore.getOriginCities() : sharedStore.getDestinationCities();
-  }, [isOrigin]);
+  useEffect(() => {
+    let active = true;
+    adminApiService
+      .getCities(type)
+      .then((list) => {
+        if (!active) return;
+        setCities(list);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setFeedbackMessage({
+          type: 'error',
+          text: err instanceof Error ? err.message : `Gagal memuat daftar ${entityTitle}.`,
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [type, entityTitle]);
 
   const filteredCities = useMemo(() => {
     if (!searchQuery.trim()) return cities;
@@ -57,95 +71,78 @@ export function CitiesManagementPage({ type }: CitiesManagementPageProps) {
     );
   }, [cities, searchQuery]);
 
-  // Open modal for add
   const handleOpenAdd = () => {
     setEditingCity(null);
     setFormName('');
-    setFormCode('');
     setFormError(null);
     setModalOpen(true);
   };
 
-  // Open modal for edit
-  const handleOpenEdit = (city: CityEntity) => {
+  const handleOpenEdit = (city: AdminCity) => {
     setEditingCity(city);
     setFormName(city.name);
-    setFormCode(city.code);
     setFormError(null);
     setModalOpen(true);
   };
 
-  const handleFormSubmit = (e: FormEvent) => {
+  const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    const values: CityFormValues = {
-      name: formName.trim(),
-      code: formCode.trim().toUpperCase(),
-    };
-
-    if (!values.name) {
+    const cleanName = formName.trim();
+    if (!cleanName) {
       setFormError('Nama kota wajib diisi.');
       return;
     }
-    if (!values.code) {
-      setFormError('Kode singkatan kota (3-4 huruf) wajib diisi.');
-      return;
-    }
 
-    if (editingCity) {
-      const res = isOrigin
-        ? sharedStore.updateOriginCity(editingCity.id, values)
-        : sharedStore.updateDestinationCity(editingCity.id, values);
-
-      if (!res.success) {
-        setFormError(res.error || 'Gagal memperbarui data kota.');
-        return;
+    setIsSubmitting(true);
+    try {
+      if (editingCity) {
+        await adminApiService.updateCity(type, editingCity.id, cleanName);
+        toast.success(`Data ${entityTitle} "${cleanName}" berhasil diperbarui.`);
+        setFeedbackMessage({ type: 'success', text: `Data ${entityTitle} "${cleanName}" berhasil diperbarui.` });
+      } else {
+        await adminApiService.createCity(type, cleanName);
+        toast.success(`${entityTitle} baru "${cleanName}" berhasil ditambahkan.`);
+        setFeedbackMessage({ type: 'success', text: `${entityTitle} baru "${cleanName}" berhasil ditambahkan.` });
       }
-      toast.success(`Data ${entityTitle} "${values.name}" berhasil diperbarui.`);
-      setFeedbackMessage({ type: 'success', text: `Data ${entityTitle} "${values.name}" berhasil diperbarui.` });
-    } else {
-      const res = isOrigin
-        ? sharedStore.addOriginCity(values)
-        : sharedStore.addDestinationCity(values);
-
-      if (!res.success) {
-        setFormError(res.error || 'Gagal menambahkan kota baru.');
-        return;
-      }
-      toast.success(`${entityTitle} baru "${values.name}" (${values.code}) berhasil ditambahkan.`);
-      setFeedbackMessage({ type: 'success', text: `${entityTitle} baru "${values.name}" (${values.code}) berhasil ditambahkan.` });
+      const updated = await adminApiService.getCities(type);
+      setCities(updated);
+      setModalOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Gagal menyimpan data kota.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setModalOpen(false);
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
-  const handleOpenDelete = (city: CityEntity) => {
+  const handleOpenDelete = (city: AdminCity) => {
     setCityToDelete(city);
     setDeleteModalOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!cityToDelete) return;
-
-    const res = isOrigin
-      ? sharedStore.deleteOriginCity(cityToDelete.id)
-      : sharedStore.deleteDestinationCity(cityToDelete.id);
-
-    if (!res.success) {
-      toast.error(res.error || 'Gagal menghapus data kota.');
-      setFeedbackMessage({ type: 'error', text: res.error || 'Gagal menghapus data kota.' });
-    } else {
-      toast.success(`${entityTitle} "${cityToDelete.name}" (${cityToDelete.code}) berhasil dihapus.`);
+    setIsSubmitting(true);
+    try {
+      await adminApiService.deleteCity(type, cityToDelete.id);
+      const updated = await adminApiService.getCities(type);
+      setCities(updated);
+      toast.success(`${entityTitle} "${cityToDelete.name}" berhasil dihapus.`);
       setFeedbackMessage({
         type: 'success',
-        text: `${entityTitle} "${cityToDelete.name}" (${cityToDelete.code}) berhasil dihapus.`,
+        text: `${entityTitle} "${cityToDelete.name}" berhasil dihapus.`,
       });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menghapus data kota.';
+      toast.error(msg);
+      setFeedbackMessage({ type: 'error', text: msg });
+    } finally {
+      setIsSubmitting(false);
+      setDeleteModalOpen(false);
+      setCityToDelete(null);
     }
-
-    setDeleteModalOpen(false);
-    setCityToDelete(null);
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
 
@@ -318,25 +315,11 @@ export function CitiesManagementPage({ type }: CitiesManagementPageProps) {
             />
           </div>
 
-          <div>
-            <Input
-              label="Kode Singkatan Kota (3 Huruf)"
-              placeholder="Contoh: BDG"
-              value={formCode}
-              onChange={(e) => setFormCode(e.target.value.toUpperCase())}
-              maxLength={4}
-              required
-            />
-            <p className="text-[11px] text-stone-500 mt-1">
-              Gunakan kode 3 huruf kapital standar (contoh: JKT, BDG, YGY, SMG, SBY).
-            </p>
-          </div>
-
           <div className="flex justify-end gap-2 pt-3 border-t border-stone-200">
-            <Button type="button" variant="ghost" onClick={() => setModalOpen(false)}>
+            <Button type="button" variant="ghost" disabled={isSubmitting} onClick={() => setModalOpen(false)}>
               Batal
             </Button>
-            <Button type="submit" variant="primary">
+            <Button type="submit" variant="primary" isLoading={isSubmitting}>
               {editingCity ? 'Simpan Perubahan' : `Tambah ${entityTitle}`}
             </Button>
           </div>

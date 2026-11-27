@@ -117,16 +117,25 @@ func formatBookingCode(id int64, createdAt time.Time) string {
 }
 
 // ExpireStalePendingBookings membatalkan pesanan belum dibayar yang telah melewati batas waktu QRIS,
-// sehingga kursinya otomatis kembali tersedia bagi penumpang lain.
+// sehingga kursinya otomatis kembali tersedia bagi penumpang lain dan status tiket diset expired.
 func (r *pgRepository) ExpireStalePendingBookings(ctx context.Context) error {
 	const query = `
-		UPDATE pesan
-		SET status = $1
-		WHERE status = $2
-		  AND (
-		      (qris_expires_at IS NOT NULL AND qris_expires_at < NOW())
-		      OR (qris_expires_at IS NULL AND created_at < NOW() - INTERVAL '30 minutes')
-		  )
+		WITH expired_bookings AS (
+			UPDATE pesan
+			SET status = $1
+			WHERE status = $2
+			  AND (
+			      (qris_expires_at IS NOT NULL AND qris_expires_at < NOW())
+			      OR (qris_expires_at IS NULL AND created_at < NOW() - INTERVAL '30 minutes')
+			  )
+			RETURNING order_code
+		)
+		UPDATE tickets t
+		SET payment_status = 'expired', updated_at = NOW()
+		FROM expired_bookings eb
+		WHERE eb.order_code IS NOT NULL
+		  AND t.order_code = eb.order_code
+		  AND t.payment_status = 'pending'
 	`
 	_, err := r.db.Exec(ctx, query, StatusCancelled, StatusPendingPayment)
 	if err != nil {
@@ -173,10 +182,11 @@ func (r *pgRepository) CreateBooking(ctx context.Context, memberID, scheduleID i
 	const insertSQL = `
 		INSERT INTO pesan (nomor_kursi, status, id_member, id_jadwal, payment_method)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id_pesan
+		RETURNING id_pesan, created_at
 	`
 	var newID int64
-	err := r.db.QueryRow(ctx, insertSQL, seatNumber, StatusPendingPayment, memberID, scheduleID, PaymentMethodQRIS).Scan(&newID)
+	var createdAt time.Time
+	err := r.db.QueryRow(ctx, insertSQL, seatNumber, StatusPendingPayment, memberID, scheduleID, PaymentMethodQRIS).Scan(&newID, &createdAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -185,7 +195,29 @@ func (r *pgRepository) CreateBooking(ctx context.Context, memberID, scheduleID i
 		return nil, fmt.Errorf("booking.Repository.CreateBooking insert: %w", err)
 	}
 
-	return r.GetBookingByID(ctx, newID)
+	b, err := r.GetBookingByID(ctx, newID)
+	if err != nil {
+		return nil, err
+	}
+
+	loc, locErr := time.LoadLocation("Asia/Jakarta")
+	ts := createdAt
+	if locErr == nil {
+		ts = ts.In(loc)
+	}
+	orderCode := fmt.Sprintf("TRV-%s-%04d", ts.Format("20060102"), newID)
+	if _, updErr := r.db.Exec(ctx, `UPDATE pesan SET order_code = $1 WHERE id_pesan = $2 AND (order_code IS NULL OR order_code = '')`, orderCode, newID); updErr == nil {
+		eventName := fmt.Sprintf("%s -> %s (%s %s WIB • Kursi %s)", b.OriginCity, b.DestCity, b.DepartureDate, b.DepartureTime, b.SeatNumber)
+		_, _ = r.db.Exec(
+			ctx,
+			`INSERT INTO tickets (user_id, order_code, event_name, amount, payment_status, ticket_status)
+			 VALUES ($1, $2, $3, $4, 'pending', 'unused')
+			 ON CONFLICT (order_code) DO NOTHING`,
+			memberID, orderCode, eventName, b.Price,
+		)
+	}
+
+	return b, nil
 }
 
 func (r *pgRepository) ListBookingsByMember(ctx context.Context, memberID int64) ([]BookingDetail, error) {
@@ -247,10 +279,63 @@ func (r *pgRepository) SaveQRISCharge(ctx context.Context, bookingID int64, orde
 	return nil
 }
 
-// MarkBookingPaid memperbarui status pesanan menjadi terkonfirmasi dan mencatatnya ke konfirmasi_pesanan secara idempoten.
+// MarkBookingPaid memperbarui status pesanan menjadi terkonfirmasi, mencatatnya ke konfirmasi_pesanan,
+// dan otomatis menandai payment_status = 'paid' di tabel tickets secara idempoten.
 func (r *pgRepository) MarkBookingPaid(ctx context.Context, bookingID int64, orderID string, paidAt time.Time) error {
 	if _, err := r.db.Exec(ctx, `UPDATE pesan SET status = $1 WHERE id_pesan = $2`, StatusConfirmed, bookingID); err != nil {
 		return fmt.Errorf("booking.Repository.MarkBookingPaid update pesan: %w", err)
+	}
+
+	var (
+		orderCode      sql.NullString
+		memberID       int64
+		memberName     string
+		price          int64
+		originName     string
+		destName       string
+		depDate        string
+		depTime        string
+		seatNumber     string
+		createdAt      time.Time
+	)
+	const infoSQL = `
+		SELECT
+			p.order_code,
+			p.id_member,
+			m.nama,
+			j.harga,
+			ka.nm_kota_asal,
+			kt.nm_kota_tujuan,
+			to_char(j.tgl_berangkat, 'YYYY-MM-DD'),
+			to_char(j.jam_berangkat, 'HH24:MI'),
+			p.nomor_kursi,
+			COALESCE(p.created_at, NOW())
+		FROM pesan p
+		JOIN member m ON p.id_member = m.id_member
+		JOIN jadwal j ON p.id_jadwal = j.id_jadwal
+		JOIN kota_asal ka ON j.id_kota_asal = ka.id_kota_asal
+		JOIN kota_tujuan kt ON j.id_kota_tujuan = kt.id_kota_tujuan
+		WHERE p.id_pesan = $1
+	`
+	if err := r.db.QueryRow(ctx, infoSQL, bookingID).Scan(
+		&orderCode, &memberID, &memberName, &price,
+		&originName, &destName, &depDate, &depTime,
+		&seatNumber, &createdAt,
+	); err != nil {
+		return fmt.Errorf("booking.Repository.MarkBookingPaid query info: %w", err)
+	}
+
+	ticketOrderCode := orderCode.String
+	if ticketOrderCode == "" {
+		loc, locErr := time.LoadLocation("Asia/Jakarta")
+		ts := createdAt
+		if locErr == nil {
+			ts = ts.In(loc)
+		}
+		ticketOrderCode = fmt.Sprintf("TRV-%s-%04d", ts.Format("20060102"), bookingID)
+		if _, err := r.db.Exec(ctx, `UPDATE pesan SET order_code = $1 WHERE id_pesan = $2`, ticketOrderCode, bookingID); err != nil {
+			return fmt.Errorf("booking.Repository.MarkBookingPaid set order_code: %w", err)
+		}
 	}
 
 	noResi := orderID
@@ -259,26 +344,59 @@ func (r *pgRepository) MarkBookingPaid(ctx context.Context, bookingID int64, ord
 	}
 
 	const insertKonf = `
-		INSERT INTO konfirmasi_pesanan (no_resi, no_rek, tgl_transfer, jam_transfer, id_pesan, id_operator)
-		VALUES ($1, 'QRIS-MIDTRANS', $2::date, $3::time, $4, NULL)
-		ON CONFLICT (id_pesan) DO NOTHING
+		INSERT INTO konfirmasi_pesanan (
+			no_resi, no_rek, tgl_transfer, jam_transfer, id_pesan, id_operator,
+			bank_name, account_holder, transfer_amount, status
+		)
+		VALUES ($1, 'QRIS-MIDTRANS', $2::date, $3::time, $4, NULL, 'QRIS Midtrans', $5, $6, 'terverifikasi')
+		ON CONFLICT (id_pesan) DO UPDATE
+		SET status = 'terverifikasi',
+		    bank_name = 'QRIS Midtrans',
+		    transfer_amount = EXCLUDED.transfer_amount
 	`
-	_, err := r.db.Exec(
+	if _, err := r.db.Exec(
 		ctx,
 		insertKonf,
 		noResi,
 		paidAt.Format("2006-01-02"),
 		paidAt.Format("15:04:05"),
 		bookingID,
-	)
-	if err != nil {
+		memberName,
+		price,
+	); err != nil {
 		return fmt.Errorf("booking.Repository.MarkBookingPaid insert konfirmasi: %w", err)
+	}
+
+	eventName := fmt.Sprintf("%s -> %s (%s %s WIB • Kursi %s)", originName, destName, depDate, depTime, seatNumber)
+	const syncTicketSQL = `
+		INSERT INTO tickets (user_id, order_code, event_name, amount, payment_status, ticket_status)
+		VALUES ($1, $2, $3, $4, 'paid', 'unused')
+		ON CONFLICT (order_code) DO UPDATE
+		SET payment_status = 'paid',
+		    updated_at = NOW()
+	`
+	if _, err := r.db.Exec(ctx, syncTicketSQL, memberID, ticketOrderCode, eventName, price); err != nil {
+		return fmt.Errorf("booking.Repository.MarkBookingPaid sync ticket: %w", err)
 	}
 	return nil
 }
 
 func (r *pgRepository) MarkBookingCancelled(ctx context.Context, bookingID int64) error {
-	_, err := r.db.Exec(ctx, `UPDATE pesan SET status = $1 WHERE id_pesan = $2 AND status = $3`, StatusCancelled, bookingID, StatusPendingPayment)
+	const query = `
+		WITH cancelled AS (
+			UPDATE pesan
+			SET status = $1
+			WHERE id_pesan = $2 AND status = $3
+			RETURNING order_code
+		)
+		UPDATE tickets t
+		SET payment_status = 'expired', updated_at = NOW()
+		FROM cancelled c
+		WHERE c.order_code IS NOT NULL
+		  AND t.order_code = c.order_code
+		  AND t.payment_status = 'pending'
+	`
+	_, err := r.db.Exec(ctx, query, StatusCancelled, bookingID, StatusPendingPayment)
 	if err != nil {
 		return fmt.Errorf("booking.Repository.MarkBookingCancelled: %w", err)
 	}

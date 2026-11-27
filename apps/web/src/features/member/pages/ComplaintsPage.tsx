@@ -1,9 +1,10 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import type { ComplaintViewModel, ComplaintStatus } from '../../../types/index';
-import { authService } from '../../auth/services/authService';
-import { mockBookingService } from '../services/mockBookingService';
-import { mockComplaintService } from '../services/mockComplaintService';
+import {
+  bookingApiService,
+  type BookingRecord,
+  type ComplaintRecord,
+} from '../services/bookingApiService';
 import { MemberLayout } from '../components/MemberLayout';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -24,27 +25,32 @@ export interface ComplaintsPageProps {
 }
 
 export function ComplaintsPage({ onNavigate }: ComplaintsPageProps) {
-  const user = authService.getCurrentUser();
   const toast = useToast();
 
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [bookings, setBookings] = useState<BookingRecord[]>([]);
+  const [complaints, setComplaints] = useState<ComplaintRecord[]>([]);
   const [selectedBookingId, setSelectedBookingId] = useState<string>('');
   const [subject, setSubject] = useState<string>('');
   const [message, setMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintViewModel | null>(null);
+  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintRecord | null>(null);
   const [formOpen, setFormOpen] = useState(false);
 
-  const bookings = useMemo(() => {
-    return mockBookingService.getAllBookings(user?.id);
-  }, [user?.id]);
-
-  const complaints = useMemo(() => {
-    // refreshKey dependency to re-query local storage on submit
-    void refreshKey;
-    return mockComplaintService.getComplaints(user?.id);
-  }, [user?.id, refreshKey]);
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      bookingApiService.getMyBookings().catch(() => [] as BookingRecord[]),
+      bookingApiService.getMyComplaints().catch(() => [] as ComplaintRecord[]),
+    ]).then(([bks, cmps]) => {
+      if (!active) return;
+      setBookings(bks);
+      setComplaints(cmps);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -58,33 +64,32 @@ export function ComplaintsPage({ onNavigate }: ComplaintsPageProps) {
       setError('Uraian detail keluhan wajib diisi.');
       return;
     }
-    if (!user) {
-      setError('Sesi member tidak valid.');
-      return;
-    }
 
     setIsSubmitting(true);
-    await mockComplaintService.submitComplaint(
-      {
+    try {
+      await bookingApiService.createComplaint({
         bookingId: selectedBookingId || undefined,
-        subject,
-        message,
-      },
-      user
-    );
-    setIsSubmitting(false);
-
-    toast.success('Pengaduan berhasil diajukan. Tim admin kami akan segera meninjau laporan Anda.');
-
-    // Reset form
-    setSubject('');
-    setMessage('');
-    setSelectedBookingId('');
-    setFormOpen(false);
-    setRefreshKey((prev) => prev + 1);
+        subject: subject.trim(),
+        message: message.trim(),
+      });
+      const updated = await bookingApiService.getMyComplaints();
+      setComplaints(updated);
+      toast.success('Pengaduan berhasil diajukan dan tersimpan di sistem kami.');
+      setSubject('');
+      setMessage('');
+      setSelectedBookingId('');
+      setFormOpen(false);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Gagal mengirim pengaduan.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const renderStatusBadge = (status: ComplaintStatus) => {
+  const renderStatusBadge = (status: ComplaintRecord['status']) => {
     switch (status) {
       case 'diajukan':
         return <StatusBadge status="warning">Diajukan</StatusBadge>;

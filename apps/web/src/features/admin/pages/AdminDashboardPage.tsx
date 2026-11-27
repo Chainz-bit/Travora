@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RoutePath } from '../../../hooks/useRouter';
-import { sharedStore } from '../../shared/services/sharedStore';
-import { useSharedStore } from '../../shared/hooks/useSharedStore';
+import {
+  adminApiService,
+  type AdminSchedule,
+  type AdminVehicle,
+} from '../services/adminApiService';
+import type { ComplaintRecord } from '../../member/services/bookingApiService';
 import {
   CalendarIcon,
   BusIcon,
@@ -10,12 +14,10 @@ import {
   BuildingIcon,
   MapPinIcon,
   AlertCircleIcon,
-  CheckIcon,
   PlusIcon,
 } from '../../../components/ui/Icons';
 import { Button } from '../../../components/ui/Button';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
-import { Modal } from '../../../components/ui/Modal';
 import { formatRupiah } from '../../../lib/utils';
 
 export interface AdminDashboardPageProps {
@@ -23,20 +25,62 @@ export interface AdminDashboardPageProps {
 }
 
 export function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
-  useSharedStore(); // reactive re-render on any store mutation
+  const [allSchedules, setAllSchedules] = useState<AdminSchedule[]>([]);
+  const [vehicles, setVehicles] = useState<AdminVehicle[]>([]);
+  const [allComplaints, setAllComplaints] = useState<ComplaintRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [resetModalOpen, setResetModalOpen] = useState(false);
-  const [resetSuccess, setResetSuccess] = useState(false);
+  const loadDashboardData = useCallback(async () => {
+    const [scheds, vehs, cmps] = await Promise.all([
+      adminApiService.getSchedules().catch(() => [] as AdminSchedule[]),
+      adminApiService.getVehicles().catch(() => [] as AdminVehicle[]),
+      adminApiService.getComplaints().catch(() => [] as ComplaintRecord[]),
+    ]);
+    return { scheds, vehs, cmps };
+  }, []);
 
-  const metrics = sharedStore.getAdminMetrics();
-  const schedules = sharedStore.getSchedules(true); // active schedules
-  const complaints = sharedStore.getComplaints().filter((c) => c.status === 'diajukan' || c.status === 'diproses');
+  useEffect(() => {
+    let active = true;
+    loadDashboardData()
+      .then(({ scheds, vehs, cmps }) => {
+        if (!active) return;
+        setAllSchedules(scheds);
+        setVehicles(vehs);
+        setAllComplaints(cmps);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadDashboardData]);
 
-  const handleResetData = () => {
-    sharedStore.resetDemoData();
-    setResetModalOpen(false);
-    setResetSuccess(true);
-    setTimeout(() => setResetSuccess(false), 3000);
+  const schedules = useMemo(() => allSchedules.filter((s) => s.isActive), [allSchedules]);
+  const complaints = useMemo(
+    () => allComplaints.filter((c) => c.status === 'diajukan' || c.status === 'diproses'),
+    [allComplaints]
+  );
+
+  const metrics = useMemo(
+    () => ({
+      activeSchedulesCount: schedules.length,
+      vehiclesCount: vehicles.length,
+      pendingComplaintsCount: complaints.length,
+    }),
+    [schedules, vehicles, complaints]
+  );
+
+  const handleRefresh = async () => {
+    setIsLoading(true);
+    try {
+      const { scheds, vehs, cmps } = await loadDashboardData();
+      setAllSchedules(scheds);
+      setVehicles(vehs);
+      setAllComplaints(cmps);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -59,10 +103,11 @@ export function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setResetModalOpen(true)}
+            onClick={handleRefresh}
+            isLoading={isLoading}
             className="text-stone-600 border-stone-300 hover:bg-stone-100"
           >
-            Reset Data Default
+            Muat Ulang Data
           </Button>
           <Button
             variant="primary"
@@ -74,13 +119,6 @@ export function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
           </Button>
         </div>
       </div>
-
-      {resetSuccess && (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 flex items-center gap-3 text-sm text-emerald-800 animate-in fade-in">
-          <CheckIcon className="size-5 text-emerald-600 shrink-0" />
-          <span>Data master dan operasional berhasil diatur ulang ke kondisi default awal.</span>
-        </div>
-      )}
 
       {/* 3 Core Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
@@ -261,7 +299,7 @@ export function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
                   </td>
                   <td className="py-3.5 px-6">
                     <span className="font-sans text-stone-900 block">{sch.departureDate}</span>
-                    <span className="text-xs font-mono text-stone-500">{sch.departureTime} WIB</span>
+                    <span className="text-xs font-mono text-stone-500">{sch.departureTime}</span>
                   </td>
                   <td className="py-3.5 px-6">
                     <span className="font-medium text-stone-900 block">{sch.vehicleName}</span>
@@ -316,28 +354,6 @@ export function AdminDashboardPage({ onNavigate }: AdminDashboardPageProps) {
           </div>
         </div>
       )}
-
-      {/* Reset Data Confirmation Modal */}
-      <Modal
-        isOpen={resetModalOpen}
-        onClose={() => setResetModalOpen(false)}
-        title="Atur Ulang Data Master"
-        description="Apakah Anda yakin ingin mengembalikan seluruh data master, pesanan, konfirmasi, dan keluhan ke kondisi awal?"
-      >
-        <div className="space-y-4 pt-2">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 leading-relaxed">
-            Tindakan ini akan mengatur ulang data master lokal pada peramban Anda kembali ke data awal. Seluruh file proyek atau kode sumber tidak akan terpengaruh.
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={() => setResetModalOpen(false)}>
-              Batal
-            </Button>
-            <Button variant="danger" onClick={handleResetData}>
-              Ya, Atur Ulang Data
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

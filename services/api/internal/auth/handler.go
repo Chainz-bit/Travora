@@ -54,6 +54,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.RegisterMember(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, ErrForbiddenRoleRegistration) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN_ROLE", err.Error())
+			return
+		}
+		if errors.Is(err, ErrUsernameExists) {
+			response.Error(w, http.StatusConflict, "USERNAME_EXISTS", err.Error())
+			return
+		}
 		if errors.Is(err, ErrInvalidInput) {
 			response.Error(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return

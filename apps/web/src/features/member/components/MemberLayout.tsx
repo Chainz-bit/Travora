@@ -11,6 +11,7 @@ import {
   MenuIcon,
   XIcon,
   BusIcon,
+  QrCodeIcon,
 } from '../../../components/ui/Icons';
 import { cn } from '../../../lib/utils';
 
@@ -52,6 +53,7 @@ export function MemberLayout({
     { label: 'Pesan Tiket', path: '/member/booking', icon: TicketIcon },
     { label: 'Konfirmasi Transfer', path: '/member/payment-confirmation', icon: ReceiptIcon },
     { label: 'Riwayat Pemesanan', path: '/member/history', icon: HistoryIcon },
+    { label: 'E-Tiket Saya', path: '/tickets', icon: QrCodeIcon },
     { label: 'Layanan Keluhan', path: '/member/complaints', icon: MessageSquareIcon },
   ];
 
