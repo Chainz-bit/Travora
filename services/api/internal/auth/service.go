@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 )
 
 // Service menangani business logic autentikasi multi-role Travora.
@@ -165,6 +168,102 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*User, string, e
 	}
 
 	return authenticatedUser, token, nil
+}
+
+// LoginWithGoogle memverifikasi Google ID Token dan mengautentikasi member.
+func (s *Service) LoginWithGoogle(ctx context.Context, rawIDToken, clientID string) (*User, string, error) {
+	rawIDToken = strings.TrimSpace(rawIDToken)
+	clientID = strings.TrimSpace(clientID)
+
+	if rawIDToken == "" || clientID == "" {
+		return nil, "", ErrInvalidInput
+	}
+
+	// Verifikasi token langsung ke Google.
+	payload, err := idtoken.Validate(ctx, rawIDToken, clientID)
+	if err != nil {
+		log.Printf("[AUTH] Google ID Token verification failed: %v", err)
+		return nil, "", ErrInvalidCredentials
+	}
+
+	email, _ := payload.Claims["email"].(string)
+	name, _ := payload.Claims["name"].(string)
+	emailVerified, _ := payload.Claims["email_verified"].(bool)
+
+	email = strings.ToLower(strings.TrimSpace(email))
+	name = strings.TrimSpace(name)
+
+	if email == "" || name == "" || !emailVerified {
+		return nil, "", ErrInvalidCredentials
+	}
+
+	// Cari akun member berdasarkan email yang terverifikasi.
+	member, err := s.repo.FindMemberByUsername(ctx, email)
+
+	if err != nil {
+		if !errors.Is(err, ErrUserNotFound) {
+			return nil, "", fmt.Errorf("gagal mencari member Google: %w", err)
+		}
+
+		// Buat password acak yang tidak diketahui pengguna.
+		randomBytes := make([]byte, 32)
+		if _, err := rand.Read(randomBytes); err != nil {
+			return nil, "", fmt.Errorf("gagal membuat kredensial akun Google: %w", err)
+		}
+
+		randomPassword := hex.EncodeToString(randomBytes)
+
+		hashedPassword, err := bcrypt.GenerateFromPassword(
+			[]byte(randomPassword),
+			bcrypt.DefaultCost,
+		)
+		if err != nil {
+			return nil, "", fmt.Errorf("gagal membuat hash password Google: %w", err)
+		}
+
+		// Buat akun member baru.
+		record := &MemberRecord{
+			Nama:         name,
+			Alamat:       "Indonesia",
+			Telepon:      "",
+			JenKelamin:   "L",
+			Username:     email,
+			PasswordHash: string(hashedPassword),
+		}
+
+		member, err = s.repo.CreateMember(ctx, record)
+		if err != nil {
+			return nil, "", fmt.Errorf("gagal membuat akun member Google: %w", err)
+		}
+	}
+
+	user := &User{
+		ID:         member.ID,
+		Role:       RoleMember,
+		Identifier: member.Username,
+		Name:       member.Nama,
+		Email:      email,
+		Username:   member.Username,
+		Phone:      member.Telepon,
+	}
+
+	// Buat token sesi yang sama dengan login biasa.
+	now := time.Now()
+	claims := SessionClaims{
+		UserID:     user.ID,
+		Role:       user.Role,
+		Identifier: user.Identifier,
+		Name:       user.Name,
+		IssuedAt:   now.Unix(),
+		ExpiresAt:  now.Add(s.sessionDuration).Unix(),
+	}
+
+	token, err := s.tokenManager.CreateToken(claims)
+	if err != nil {
+		return nil, "", fmt.Errorf("gagal membuat token sesi Google: %w", err)
+	}
+
+	return user, token, nil
 }
 
 // ValidateSession memverifikasi token sesi dan memvalidasi keberadaan pengguna di database.
@@ -342,4 +441,3 @@ func (s *Service) RegisterMember(ctx context.Context, req RegisterRequest) (*Use
 		Phone:      created.Telepon,
 	}, nil
 }
-

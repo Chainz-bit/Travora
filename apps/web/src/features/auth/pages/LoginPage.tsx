@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import type { RoutePath } from '../../../hooks/useRouter';
-import type { UserRole } from '../../../types';
-import { authService } from '../services/authService';
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { RoutePath } from "../../../hooks/useRouter";
+import type { UserRole } from "../../../types";
+import { authService } from "../services/authService";
 import {
   BusIcon,
   UserIcon,
@@ -10,9 +10,41 @@ import {
   EyeIcon,
   EyeOffIcon,
   AlertCircleIcon,
-} from '../../../components/ui/Icons';
-import { Button } from '../../../components/ui/Button';
-import { Input } from '../../../components/ui/Input';
+} from "../../../components/ui/Icons";
+import { Button } from "../../../components/ui/Button";
+import { Input } from "../../../components/ui/Input";
+
+interface GoogleCredentialResponse {
+  credential: string;
+}
+
+interface GoogleButtonOptions {
+  type: "standard";
+  theme: "outline" | "filled_blue" | "filled_black";
+  size: "large" | "medium" | "small";
+  text: "signin_with" | "signup_with" | "continue_with" | "signin";
+  shape: "rectangular" | "pill" | "circle" | "square";
+  width: number;
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: {
+            client_id: string;
+            callback: (response: GoogleCredentialResponse) => void;
+          }) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: GoogleButtonOptions,
+          ) => void;
+        };
+      };
+    };
+  }
+}
 
 export interface LoginPageProps {
   onNavigate: (path: RoutePath) => void;
@@ -23,89 +55,210 @@ export interface LoginPageProps {
 export function LoginPage({
   onNavigate,
   redirectPath,
-  defaultRole = 'member',
+  defaultRole = "member",
 }: LoginPageProps) {
   const [selectedRole, setSelectedRole] = useState<UserRole>(defaultRole);
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Ganti role secara reaktif tanpa cascading render effect
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  const navigateToDashboard = (role: UserRole) => {
+    if (redirectPath) {
+      if (role === "admin" && redirectPath.startsWith("/admin")) {
+        onNavigate(redirectPath as RoutePath);
+        return;
+      }
+
+      if (role === "operator" && redirectPath.startsWith("/operator")) {
+        onNavigate(redirectPath as RoutePath);
+        return;
+      }
+
+      if (role === "member" && redirectPath.startsWith("/member")) {
+        onNavigate(redirectPath as RoutePath);
+        return;
+      }
+    }
+
+    if (role === "admin") {
+      onNavigate("/admin");
+    } else if (role === "operator") {
+      onNavigate("/operator");
+    } else {
+      onNavigate("/member");
+    }
+  };
+
   const handleRoleChange = (role: UserRole) => {
     setSelectedRole(role);
     setError(null);
-    setIdentifier('');
-    setPassword('');
+    setIdentifier("");
+    setPassword("");
   };
 
-  // Handler navigasi dashboard sesuai role yang berhasil diotentikasi backend
-  const navigateToDashboard = (role: UserRole) => {
-    if (redirectPath) {
-      if (role === 'admin' && redirectPath.startsWith('/admin')) {
-        onNavigate(redirectPath as RoutePath);
-        return;
-      }
-      if (role === 'operator' && redirectPath.startsWith('/operator')) {
-        onNavigate(redirectPath as RoutePath);
-        return;
-      }
-      if (role === 'member' && redirectPath.startsWith('/member')) {
-        onNavigate(redirectPath as RoutePath);
-        return;
-      }
+  // Memproses login menggunakan Google Identity Services.
+  const handleGoogleLogin = async (response: GoogleCredentialResponse) => {
+    if (!response.credential) {
+      setError("Google tidak memberikan ID Token. Silakan coba kembali.");
+      return;
     }
 
-    if (role === 'admin') {
-      onNavigate('/admin');
-    } else if (role === 'operator') {
-      onNavigate('/operator');
+    setError(null);
+    setLoading(true);
+
+    try {
+      const result = await authService.loginWithGoogle(response.credential);
+
+      if (result.success && result.user) {
+        if (result.user.role !== "member") {
+          setError("Login Google hanya tersedia untuk akun Member.");
+          return;
+        }
+
+        navigateToDashboard(result.user.role);
+      } else {
+        setError(result.error || "Login dengan Google gagal.");
+      }
+    } catch (err) {
+      console.error("Google Login Error:", err);
+      setError("Terjadi kesalahan saat login menggunakan Google.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Memuat Google Identity Services dan menampilkan tombol Google.
+  useEffect(() => {
+    if (selectedRole !== "member") {
+      return;
+    }
+
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+    if (!clientId) {
+      setError(
+        "Google Client ID belum dikonfigurasi. Periksa VITE_GOOGLE_CLIENT_ID di file .env.",
+      );
+      return;
+    }
+
+    let cancelled = false;
+
+    const initializeGoogle = () => {
+      if (cancelled || !googleButtonRef.current || !window.google) {
+        return;
+      }
+
+      const google = window.google;
+
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleLogin,
+      });
+
+      googleButtonRef.current.innerHTML = "";
+
+      google.accounts.id.renderButton(googleButtonRef.current, {
+        type: "standard",
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "rectangular",
+        width: 320,
+      });
+    };
+
+    let script = document.getElementById(
+      "google-identity-script",
+    ) as HTMLScriptElement | null;
+
+    if (window.google) {
+      initializeGoogle();
+    } else if (!script) {
+      script = document.createElement("script");
+      script.id = "google-identity-script";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+
+      script.onload = initializeGoogle;
+
+      script.onerror = () => {
+        if (!cancelled) {
+          setError(
+            "Gagal memuat layanan Google. Periksa koneksi internet Anda.",
+          );
+        }
+      };
+
+      document.head.appendChild(script);
     } else {
-      onNavigate('/member');
+      script.addEventListener("load", initializeGoogle);
     }
-  };
+
+    return () => {
+      cancelled = true;
+
+      if (script) {
+        script.removeEventListener("load", initializeGoogle);
+      }
+
+      if (googleButtonRef.current) {
+        googleButtonRef.current.innerHTML = "";
+      }
+    };
+  }, [selectedRole]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
     const cleanIdentifier = identifier.trim();
+
     if (!cleanIdentifier) {
       setError(
-        selectedRole === 'admin'
-          ? 'Alamat email wajib diisi.'
-          : 'Username akun wajib diisi.'
+        selectedRole === "admin"
+          ? "Alamat email wajib diisi."
+          : "Username akun wajib diisi.",
       );
       return;
     }
+
     if (!password) {
-      setError('Kata sandi wajib diisi.');
+      setError("Kata sandi wajib diisi.");
       return;
     }
 
     setLoading(true);
-    const res = await authService.login({
-      role: selectedRole,
-      identifier: cleanIdentifier,
-      password,
-    });
-    setLoading(false);
 
-    if (res.success && res.user) {
-      navigateToDashboard(res.user.role);
-    } else {
-      setError(res.error || 'Kredensial login tidak valid.');
+    try {
+      const res = await authService.login({
+        role: selectedRole,
+        identifier: cleanIdentifier,
+        password,
+      });
+
+      if (res.success && res.user) {
+        navigateToDashboard(res.user.role);
+      } else {
+        setError(res.error || "Kredensial login tidak valid.");
+      }
+    } catch (err) {
+      console.error("Login Error:", err);
+      setError("Terjadi kesalahan saat login.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="h-dvh w-full flex flex-col lg:flex-row overflow-hidden bg-canvas-public font-sans">
-      {/* =========================================================================
-          LEFT PANEL: EDITORIAL TRAVEL STORY (DESKTOP VISUAL)
-         ========================================================================= */}
+      {/* LEFT PANEL */}
       <div className="hidden lg:flex lg:w-1/2 h-full shrink-0 relative bg-text-main text-stone-200 overflow-hidden flex-col justify-between p-10 xl:p-14 2xl:p-16 select-none">
-        {/* Background Atmosphere Image with Gradient Overlay */}
         <div className="absolute inset-0 pointer-events-none opacity-35">
           <img
             src="/hero-travel.jpg"
@@ -113,18 +266,19 @@ export function LoginPage({
             className="w-full h-full object-cover scale-105 filter brightness-75 contrast-110"
           />
         </div>
+
         <div className="absolute inset-0 bg-linear-to-t from-text-main via-text-main/75 to-transparent" />
 
-        {/* Top Brand Mark */}
         <div className="relative z-10">
           <button
             type="button"
-            onClick={() => onNavigate('/')}
+            onClick={() => onNavigate("/")}
             className="inline-flex items-center gap-3 cursor-pointer group"
           >
             <div className="size-10 rounded-xl bg-primary flex items-center justify-center text-white shadow-sm group-hover:bg-primary-hover transition-colors">
               <BusIcon className="size-5.5" />
             </div>
+
             <div className="flex flex-col text-left">
               <span className="font-serif text-2xl font-bold tracking-tight text-white leading-none">
                 TRAVORA
@@ -136,79 +290,87 @@ export function LoginPage({
           </button>
         </div>
 
-        {/* Center Editorial Quote */}
         <div className="relative z-10 space-y-6 max-w-lg my-auto py-12">
           <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider text-amber-300 bg-amber-950/60 border border-amber-800/40">
             Kenyamanan Perjalanan Terjadwal
           </span>
 
           <blockquote className="font-serif text-3xl xl:text-4xl font-bold text-white leading-snug tracking-tight">
-            “Kenyamanan bepergian dimulai dari kepastian jadwal, armada terawat, dan alur tiket yang tertib.”
+            “Kenyamanan bepergian dimulai dari kepastian jadwal, armada terawat,
+            dan alur tiket yang tertib.”
           </blockquote>
 
           <div className="space-y-3 pt-2 text-xs text-stone-300 leading-relaxed">
             <div className="flex items-center gap-2.5">
               <span className="size-1.5 rounded-full bg-primary" />
-              <span>Armada Toyota HiAce & Isuzu Elf dengan pendingin udara prima</span>
+              <span>
+                Armada Toyota HiAce & Isuzu Elf dengan pendingin udara prima
+              </span>
             </div>
+
             <div className="flex items-center gap-2.5">
               <span className="size-1.5 rounded-full bg-primary" />
               <span>Pilihan nomor kursi transparan tanpa tumpang tindih</span>
             </div>
+
             <div className="flex items-center gap-2.5">
               <span className="size-1.5 rounded-full bg-primary" />
-              <span>Verifikasi transfer tertata langsung ke loket keberangkatan</span>
+              <span>
+                Verifikasi transfer tertata langsung ke loket keberangkatan
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Bottom Editorial Note */}
         <div className="relative z-10 flex items-center justify-between text-xs text-stone-400 pt-6 border-t border-stone-800/80">
           <span>Sistem Informasi Tiket Travora</span>
-          <span className="font-mono text-[11px]">© 2026 PT Travora Nusantara</span>
+          <span className="font-mono text-[11px]">
+            © 2026 PT Travora Nusantara
+          </span>
         </div>
       </div>
 
-      {/* =========================================================================
-          RIGHT PANEL: CLEAN, PREMIUM AUTHENTICATION FORM (INDEPENDENT SCROLL)
-         ========================================================================= */}
+      {/* RIGHT PANEL */}
       <div className="w-full lg:w-1/2 h-full flex flex-col overflow-y-auto overflow-x-hidden min-h-0 bg-canvas-public">
         <div className="max-w-md w-full mx-auto space-y-6 my-auto px-4 sm:px-8 md:px-12 py-8 sm:py-12">
-          {/* Mobile Brand Link (Only on Mobile/Tablet) */}
+          {/* MOBILE BRAND */}
           <div className="lg:hidden text-center pb-2">
             <button
               type="button"
-              onClick={() => onNavigate('/')}
+              onClick={() => onNavigate("/")}
               className="inline-flex items-center gap-2.5 mx-auto group cursor-pointer"
             >
               <div className="size-9 rounded-xl bg-primary flex items-center justify-center text-white shadow-xs">
                 <BusIcon className="size-5" />
               </div>
+
               <span className="font-serif text-2xl font-bold tracking-tight text-stone-950">
                 TRAVORA
               </span>
             </button>
           </div>
 
-          {/* Form Header */}
+          {/* HEADER */}
           <div className="space-y-1.5 text-center lg:text-left">
             <h2 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-stone-950">
               Masuk ke Akun Anda
             </h2>
+
             <p className="text-xs sm:text-sm text-stone-600">
-              Pilih peran akun di bawah ini untuk mengakses layanan atau portal operasional.
+              Pilih peran akun di bawah ini untuk mengakses layanan atau portal
+              operasional.
             </p>
           </div>
 
-          {/* Role Switcher Tabs */}
+          {/* ROLE SWITCHER */}
           <div className="flex rounded-xl bg-stone-200/70 p-1 border border-stone-300/60 shadow-2xs">
             <button
               type="button"
-              onClick={() => handleRoleChange('member')}
+              onClick={() => handleRoleChange("member")}
               className={`flex-1 py-2 px-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                selectedRole === 'member'
-                  ? 'bg-white text-stone-950 shadow-xs border border-stone-200'
-                  : 'text-stone-600 hover:text-stone-900'
+                selectedRole === "member"
+                  ? "bg-white text-stone-950 shadow-xs border border-stone-200"
+                  : "text-stone-600 hover:text-stone-900"
               }`}
             >
               <UserIcon className="size-4 text-primary" />
@@ -217,11 +379,11 @@ export function LoginPage({
 
             <button
               type="button"
-              onClick={() => handleRoleChange('admin')}
+              onClick={() => handleRoleChange("admin")}
               className={`flex-1 py-2 px-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                selectedRole === 'admin'
-                  ? 'bg-white text-stone-950 shadow-xs border border-stone-200'
-                  : 'text-stone-600 hover:text-stone-900'
+                selectedRole === "admin"
+                  ? "bg-white text-stone-950 shadow-xs border border-stone-200"
+                  : "text-stone-600 hover:text-stone-900"
               }`}
             >
               <ShieldCheckIcon className="size-4 text-emerald-700" />
@@ -230,11 +392,11 @@ export function LoginPage({
 
             <button
               type="button"
-              onClick={() => handleRoleChange('operator')}
+              onClick={() => handleRoleChange("operator")}
               className={`flex-1 py-2 px-2.5 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                selectedRole === 'operator'
-                  ? 'bg-white text-stone-950 shadow-xs border border-stone-200'
-                  : 'text-stone-600 hover:text-stone-900'
+                selectedRole === "operator"
+                  ? "bg-white text-stone-950 shadow-xs border border-stone-200"
+                  : "text-stone-600 hover:text-stone-900"
               }`}
             >
               <ReceiptIcon className="size-4 text-amber-700" />
@@ -242,29 +404,30 @@ export function LoginPage({
             </button>
           </div>
 
-          {/* Form Card */}
+          {/* LOGIN CARD */}
           <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200/90 shadow-sm space-y-5">
-            {/* Header Role Terpilih */}
             <div className="border-b border-stone-100 pb-3 flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 block">
                   Peran Terpilih
                 </span>
+
                 <span className="text-sm font-bold text-stone-900 font-serif">
-                  {selectedRole === 'admin'
-                    ? 'Administrator Master Data'
-                    : selectedRole === 'operator'
-                    ? 'Petugas Operasional Loket'
-                    : 'Penumpang / Member'}
+                  {selectedRole === "admin"
+                    ? "Administrator Master Data"
+                    : selectedRole === "operator"
+                      ? "Petugas Operasional Loket"
+                      : "Penumpang / Member"}
                 </span>
               </div>
+
               <span
                 className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                  selectedRole === 'admin'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : selectedRole === 'operator'
-                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                    : 'bg-orange-50 text-primary border border-orange-200'
+                  selectedRole === "admin"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : selectedRole === "operator"
+                      ? "bg-amber-50 text-amber-700 border border-amber-200"
+                      : "bg-orange-50 text-primary border border-orange-200"
                 }`}
               >
                 {selectedRole.toUpperCase()}
@@ -278,25 +441,21 @@ export function LoginPage({
               </div>
             )}
 
-            {/* Form Fields */}
+            {/* USERNAME AND PASSWORD LOGIN */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input
-                label={
-                  selectedRole === 'admin'
-                    ? 'Alamat Email'
-                    : 'Username'
-                }
-                type={selectedRole === 'admin' ? 'email' : 'text'}
+                label={selectedRole === "admin" ? "Alamat Email" : "Username"}
+                type={selectedRole === "admin" ? "email" : "text"}
                 placeholder={
-                  selectedRole === 'admin'
-                    ? 'contoh: admin@travora.id'
-                    : selectedRole === 'operator'
-                    ? 'contoh: operator_bandung'
-                    : 'contoh: budi_santoso'
+                  selectedRole === "admin"
+                    ? "contoh: admin@travora.id"
+                    : selectedRole === "operator"
+                      ? "contoh: operator_bandung"
+                      : "contoh: budi_santoso"
                 }
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                autoComplete={selectedRole === 'admin' ? 'email' : 'username'}
+                autoComplete={selectedRole === "admin" ? "email" : "username"}
                 disabled={loading}
               />
 
@@ -304,9 +463,10 @@ export function LoginPage({
                 <label className="block text-sm font-medium text-stone-900 mb-1.5 select-none">
                   Kata Sandi
                 </label>
+
                 <div className="relative flex items-center">
                   <input
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     placeholder="Masukkan kata sandi"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -314,13 +474,22 @@ export function LoginPage({
                     disabled={loading}
                     className="w-full h-11 px-3.5 pr-10 rounded-xl auth-form-field text-sm transition-all duration-150 border shadow-2xs focus:ring-2 focus:ring-primary/20"
                   />
+
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 text-stone-400 hover:text-stone-700 p-1 cursor-pointer transition-colors"
-                    aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+                    aria-label={
+                      showPassword
+                        ? "Sembunyikan kata sandi"
+                        : "Tampilkan kata sandi"
+                    }
                   >
-                    {showPassword ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                    {showPassword ? (
+                      <EyeOffIcon className="size-4" />
+                    ) : (
+                      <EyeIcon className="size-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -337,16 +506,42 @@ export function LoginPage({
                 </Button>
               </div>
             </form>
+
+            {/* GOOGLE LOGIN - MEMBER ONLY */}
+            {selectedRole === "member" && (
+              <div className="space-y-4">
+                <div className="relative flex items-center">
+                  <div className="flex-grow border-t border-stone-200" />
+                  <span className="px-3 text-xs text-stone-400">
+                    atau masuk dengan
+                  </span>
+                  <div className="flex-grow border-t border-stone-200" />
+                </div>
+
+                <div className="flex justify-center">
+                  <div
+                    ref={googleButtonRef}
+                    className="min-h-10 flex justify-center"
+                  />
+                </div>
+
+                {loading && (
+                  <p className="text-center text-xs text-stone-500">
+                    Sedang memproses login...
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Links & Navigation Help */}
+          {/* FOOTER LINKS */}
           <div className="text-center space-y-2 text-xs text-stone-500">
-            {selectedRole === 'member' ? (
+            {selectedRole === "member" ? (
               <p>
-                Belum memiliki akun member?{' '}
+                Belum memiliki akun member?{" "}
                 <button
                   type="button"
-                  onClick={() => onNavigate('/register')}
+                  onClick={() => onNavigate("/register")}
                   className="font-semibold text-primary hover:underline cursor-pointer"
                 >
                   Daftar di Sini
@@ -354,13 +549,17 @@ export function LoginPage({
               </p>
             ) : (
               <p className="text-[11px] text-stone-500 bg-stone-100/80 border border-stone-200/70 py-1.5 px-3 rounded-xl max-w-sm mx-auto">
-                Akun {selectedRole === 'admin' ? 'Administrator' : 'Petugas Loket'} dibuat melalui mekanisme provisioning sistem dan tidak menyediakan registrasi mandiri publik.
+                Akun{" "}
+                {selectedRole === "admin" ? "Administrator" : "Petugas Loket"}{" "}
+                dibuat melalui mekanisme provisioning sistem dan tidak
+                menyediakan registrasi mandiri publik.
               </p>
             )}
+
             <p>
               <button
                 type="button"
-                onClick={() => onNavigate('/')}
+                onClick={() => onNavigate("/")}
                 className="hover:text-stone-800 hover:underline cursor-pointer inline-flex items-center gap-1"
               >
                 &larr; Kembali ke Halaman Utama

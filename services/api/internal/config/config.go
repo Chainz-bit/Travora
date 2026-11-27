@@ -28,10 +28,11 @@ type Config struct {
 	DBPoolMaxConnIdleTime time.Duration
 	DBConnectTimeout      time.Duration
 
-	SessionSecret   string
-	SessionDuration time.Duration
-	CookieSecure    bool
-	CORSOrigins     []string
+	SessionSecret       string
+	SessionDuration     time.Duration
+	CookieSecure        bool
+	CORSOrigins         []string
+	GoogleOAuthClientID string
 
 	MidtransServerKey    string
 	MidtransSignatureKey string
@@ -72,10 +73,11 @@ func LoadFromEnv(lookup func(string) string) (*Config, error) {
 		DBPoolMaxConnIdleTime: getEnvAsDuration(lookup, "DB_POOL_MAX_CONN_IDLE_TIME", 30*time.Minute),
 		DBConnectTimeout:      getEnvAsDuration(lookup, "DB_CONNECT_TIMEOUT", 5*time.Second),
 
-		SessionSecret:   getEnv(lookup, "SESSION_SECRET", "travora-dev-session-secret-key-32chars!!"),
-		SessionDuration: getEnvAsDuration(lookup, "SESSION_DURATION", 24*time.Hour),
-		CookieSecure:    getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
-		CORSOrigins:     parseCSVEnv(lookup("CORS_ORIGINS")),
+		SessionSecret:       getEnv(lookup, "SESSION_SECRET", "travora-dev-session-secret-key-32chars!!"),
+		SessionDuration:     getEnvAsDuration(lookup, "SESSION_DURATION", 24*time.Hour),
+		CookieSecure:        getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
+		CORSOrigins:         parseCSVEnv(lookup("CORS_ORIGINS")),
+		GoogleOAuthClientID: getEnv(lookup, "GOOGLE_OAUTH_CLIENT_ID", ""),
 
 		MidtransServerKey:    getEnv(lookup, "MIDTRANS_SERVER_KEY", ""),
 		MidtransSignatureKey: getEnv(lookup, "MIDTRANS_SIGNATURE_KEY", ""),

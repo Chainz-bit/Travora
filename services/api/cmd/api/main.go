@@ -61,8 +61,9 @@ func main() {
 	tokenManager := auth.NewTokenManager(cfg.SessionSecret)
 	authService := auth.NewService(authRepo, tokenManager, cfg.SessionDuration)
 	authHandler := auth.NewHandler(authService, auth.CookieConfig{
-		Secure:   cfg.CookieSecure,
-		Duration: cfg.SessionDuration,
+		Secure:              cfg.CookieSecure,
+		Duration:            cfg.SessionDuration,
+		GoogleOAuthClientID: cfg.GoogleOAuthClientID,
 	})
 
 	masterDataRepo := masterdata.NewRepository(db.Pool())
