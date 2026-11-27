@@ -33,6 +33,7 @@ type Config struct {
 	CookieSecure    bool
 
 	MidtransServerKey    string
+	MidtransSignatureKey string
 	MidtransIsProduction bool
 }
 
@@ -75,6 +76,7 @@ func LoadFromEnv(lookup func(string) string) (*Config, error) {
 		CookieSecure:    getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
 
 		MidtransServerKey:    getEnv(lookup, "MIDTRANS_SERVER_KEY", ""),
+		MidtransSignatureKey: getEnv(lookup, "MIDTRANS_SIGNATURE_KEY", ""),
 		MidtransIsProduction: getEnvAsBool(lookup, "MIDTRANS_IS_PRODUCTION", false),
 	}
 
@@ -240,4 +242,3 @@ func getEnvAsBool(lookup func(string) string, key string, defaultVal bool) bool 
 	}
 	return valStr == "true" || valStr == "1" || valStr == "yes"
 }
-

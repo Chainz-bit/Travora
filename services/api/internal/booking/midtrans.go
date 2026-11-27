@@ -57,19 +57,27 @@ type MidtransClient interface {
 
 type httpMidtransClient struct {
 	serverKey    string
+	signatureKey string
 	isProduction bool
 	baseURL      string
 	httpClient   *http.Client
 }
 
 // NewMidtransClient membuat client HTTP standar untuk Midtrans Core API v2 (tanpa library eksternal).
-func NewMidtransClient(serverKey string, isProduction bool) MidtransClient {
+// signatureKey bersifat opsional; jika kosong, otomatis menggunakan serverKey.
+func NewMidtransClient(serverKey string, isProduction bool, signatureKey ...string) MidtransClient {
 	baseURL := midtransSandboxBaseURL
 	if isProduction {
 		baseURL = midtransProductionBaseURL
 	}
+	srvKey := strings.TrimSpace(serverKey)
+	sigKey := srvKey
+	if len(signatureKey) > 0 && strings.TrimSpace(signatureKey[0]) != "" {
+		sigKey = strings.TrimSpace(signatureKey[0])
+	}
 	return &httpMidtransClient{
-		serverKey:    strings.TrimSpace(serverKey),
+		serverKey:    srvKey,
+		signatureKey: sigKey,
 		isProduction: isProduction,
 		baseURL:      baseURL,
 		httpClient: &http.Client{
@@ -146,11 +154,12 @@ func (c *httpMidtransClient) ChargeQRIS(ctx context.Context, input MidtransCharg
 	}
 
 	var parsed struct {
-		StatusCode        string `json:"status_code"`
-		StatusMessage     string `json:"status_message"`
-		OrderID           string `json:"order_id"`
-		TransactionStatus string `json:"transaction_status"`
-		ExpiryTime        string `json:"expiry_time"`
+		StatusCode        string   `json:"status_code"`
+		StatusMessage     string   `json:"status_message"`
+		ErrorMessages     []string `json:"error_messages"`
+		OrderID           string   `json:"order_id"`
+		TransactionStatus string   `json:"transaction_status"`
+		ExpiryTime        string   `json:"expiry_time"`
 		Actions           []struct {
 			Name string `json:"name"`
 			URL  string `json:"url"`
@@ -162,7 +171,18 @@ func (c *httpMidtransClient) ChargeQRIS(ctx context.Context, input MidtransCharg
 	}
 
 	if parsed.StatusCode != "201" && parsed.StatusCode != "200" {
-		return nil, fmt.Errorf("Midtrans menolak transaksi QRIS (code %s): %s", parsed.StatusCode, parsed.StatusMessage)
+		detail := parsed.StatusMessage
+		if detail == "" && len(parsed.ErrorMessages) > 0 {
+			detail = strings.Join(parsed.ErrorMessages, "; ")
+		}
+		if detail == "" {
+			detail = strings.TrimSpace(string(respBody))
+		}
+		code := parsed.StatusCode
+		if code == "" {
+			code = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("Midtrans menolak transaksi QRIS (%s): %s", code, detail)
 	}
 
 	qrisURL := ""
@@ -247,13 +267,13 @@ func (c *httpMidtransClient) GetTransactionStatus(ctx context.Context, orderID s
 }
 
 // VerifySignature memvalidasi signature_key webhook Midtrans menggunakan SHA-512 secara constant-time.
-// Rumus resmi Midtrans: SHA512(order_id + status_code + gross_amount + ServerKey)
+// Rumus resmi Midtrans: SHA512(order_id + status_code + gross_amount + SignatureKey)
 func (c *httpMidtransClient) VerifySignature(orderID, statusCode, grossAmount, signatureKey string) bool {
-	if !c.IsConfigured() || signatureKey == "" {
+	if c.signatureKey == "" || signatureKey == "" {
 		return false
 	}
 
-	raw := orderID + statusCode + grossAmount + c.serverKey
+	raw := orderID + statusCode + grossAmount + c.signatureKey
 	sum := sha512.Sum512([]byte(raw))
 	expectedHex := hex.EncodeToString(sum[:])
 

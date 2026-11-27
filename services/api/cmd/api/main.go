@@ -68,7 +68,7 @@ func main() {
 	scheduleService := schedule.NewService(scheduleRepo)
 	scheduleHandler := schedule.NewHandler(scheduleService)
 
-	midtransClient := booking.NewMidtransClient(cfg.MidtransServerKey, cfg.MidtransIsProduction)
+	midtransClient := booking.NewMidtransClient(cfg.MidtransServerKey, cfg.MidtransIsProduction, cfg.MidtransSignatureKey)
 	bookingRepo := booking.NewRepository(db.Pool())
 	bookingService := booking.NewService(bookingRepo, midtransClient)
 	bookingHandler := booking.NewHandler(bookingService, authService)
