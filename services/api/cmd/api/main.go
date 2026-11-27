@@ -13,6 +13,7 @@ import (
 	"travora/api/internal/adminmaster"
 	"travora/api/internal/adminoperators"
 	"travora/api/internal/auth"
+	"travora/api/internal/booking"
 	"travora/api/internal/bookings"
 	"travora/api/internal/complaints"
 	"travora/api/internal/config"
@@ -86,6 +87,11 @@ func main() {
 	bookingService := bookings.NewService(bookingRepo)
 	bookingHandler := bookings.NewHandler(bookingService, authService)
 
+	midtransClient := booking.NewMidtransClient(cfg.MidtransServerKey, cfg.MidtransIsProduction, cfg.MidtransSignatureKey)
+	qrisBookingRepo := booking.NewRepository(db.Pool())
+	qrisBookingService := booking.NewService(qrisBookingRepo, midtransClient)
+	qrisBookingHandler := booking.NewHandler(qrisBookingService, authService)
+
 	adminOpRepo := adminoperators.NewRepository(db.Pool())
 	adminOpService := adminoperators.NewService(adminOpRepo)
 	adminOpHandler := adminoperators.NewHandler(adminOpService, authService)
@@ -107,6 +113,7 @@ func main() {
 		AdminMasterHandler:    adminMasterHandler,
 		AdminOperatorsHandler: adminOpHandler,
 		AuthHandler:           authHandler,
+		BookingHandler:        qrisBookingHandler,
 		BookingsHandler:       bookingHandler,
 		ComplaintsHandler:     complaintsHandler,
 		HealthHandler:         healthHandler,

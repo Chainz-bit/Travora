@@ -72,6 +72,10 @@ func (r *pgRepository) EnsureSchema(ctx context.Context) error {
 	const ddl = `
 		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS order_code VARCHAR(50);
 		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30) NOT NULL DEFAULT 'qris';
+		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS midtrans_order_id VARCHAR(64);
+		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS qris_url TEXT;
+		ALTER TABLE pesan ADD COLUMN IF NOT EXISTS qris_expires_at TIMESTAMPTZ;
 
 		UPDATE pesan
 		SET order_code = 'TRV-' || to_char(COALESCE(created_at, NOW()), 'YYYYMMDD') || '-' || LPAD(id_pesan::text, 4, '0')
@@ -85,6 +89,10 @@ func (r *pgRepository) EnsureSchema(ctx context.Context) error {
 				ALTER TABLE pesan ADD CONSTRAINT uq_pesan_order_code UNIQUE (order_code);
 			END IF;
 		END $$;
+
+		CREATE UNIQUE INDEX IF NOT EXISTS uq_pesan_midtrans_order_id
+			ON pesan (midtrans_order_id)
+			WHERE midtrans_order_id IS NOT NULL;
 
 		ALTER TABLE konfirmasi_pesanan ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100) NOT NULL DEFAULT '';
 		ALTER TABLE konfirmasi_pesanan ADD COLUMN IF NOT EXISTS account_holder VARCHAR(120) NOT NULL DEFAULT '';

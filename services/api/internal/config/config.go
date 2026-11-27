@@ -32,6 +32,10 @@ type Config struct {
 	SessionDuration time.Duration
 	CookieSecure    bool
 	CORSOrigins     []string
+
+	MidtransServerKey    string
+	MidtransSignatureKey string
+	MidtransIsProduction bool
 }
 
 // Load membaca konfigurasi dari environment variables dengan nilai default yang aman.
@@ -72,6 +76,10 @@ func LoadFromEnv(lookup func(string) string) (*Config, error) {
 		SessionDuration: getEnvAsDuration(lookup, "SESSION_DURATION", 24*time.Hour),
 		CookieSecure:    getEnvAsBool(lookup, "COOKIE_SECURE", getEnv(lookup, "APP_ENV", "development") == "production"),
 		CORSOrigins:     parseCSVEnv(lookup("CORS_ORIGINS")),
+
+		MidtransServerKey:    getEnv(lookup, "MIDTRANS_SERVER_KEY", ""),
+		MidtransSignatureKey: getEnv(lookup, "MIDTRANS_SIGNATURE_KEY", ""),
+		MidtransIsProduction: getEnvAsBool(lookup, "MIDTRANS_IS_PRODUCTION", false),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -250,4 +258,3 @@ func getEnvAsBool(lookup func(string) string, key string, defaultVal bool) bool 
 	}
 	return valStr == "true" || valStr == "1" || valStr == "yes"
 }
-

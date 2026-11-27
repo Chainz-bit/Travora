@@ -7,6 +7,7 @@ import (
 	"travora/api/internal/adminmaster"
 	"travora/api/internal/adminoperators"
 	"travora/api/internal/auth"
+	"travora/api/internal/booking"
 	"travora/api/internal/bookings"
 	"travora/api/internal/complaints"
 	"travora/api/internal/health"
@@ -22,6 +23,7 @@ type Config struct {
 	AdminMasterHandler    *adminmaster.Handler
 	AdminOperatorsHandler *adminoperators.Handler
 	AuthHandler           *auth.Handler
+	BookingHandler        *booking.Handler
 	BookingsHandler       *bookings.Handler
 	ComplaintsHandler     *complaints.Handler
 	HealthHandler         *health.Handler
@@ -134,17 +136,22 @@ func New(cfg Config) http.Handler {
 		cfg.BookingsHandler.RegisterRoutes(mux)
 	}
 
-	// 8. Daftarkan Admin Master Data & Jadwal endpoints (wajib role == admin)
+	// 8. Daftarkan Booking & Pembayaran QRIS Midtrans endpoints
+	if cfg.BookingHandler != nil {
+		cfg.BookingHandler.RegisterRoutes(mux)
+	}
+
+	// 9. Daftarkan Admin Master Data & Jadwal endpoints (wajib role == admin)
 	if cfg.AdminMasterHandler != nil {
 		cfg.AdminMasterHandler.RegisterRoutes(mux)
 	}
 
-	// 9. Daftarkan Complaints endpoints (member & admin)
+	// 10. Daftarkan Complaints endpoints (member & admin)
 	if cfg.ComplaintsHandler != nil {
 		cfg.ComplaintsHandler.RegisterRoutes(mux)
 	}
 
-	// 10. Pasang wrapper JSON error untuk respons 404 dan 405 bawaan ServeMux
+	// 11. Pasang wrapper JSON error untuk respons 404 dan 405 bawaan ServeMux
 	handlerWithJSONErrors := jsonErrorHandler(mux)
 
 	// 5. Konfigurasi dan pasang middleware CORS
